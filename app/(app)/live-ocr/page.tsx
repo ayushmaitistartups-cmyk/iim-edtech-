@@ -52,6 +52,7 @@ export default function LiveOCRPage(): JSX.Element {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [textInput, setTextInput] = useState<string>("");
+  const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera } = useCamera();
   const {
@@ -73,7 +74,7 @@ export default function LiveOCRPage(): JSX.Element {
     streamingText,
     submitText,
     transcript
-  } = useLiveOCRAgent(exam, videoRef);
+  } = useLiveOCRAgent(exam, videoRef, voiceOutputEnabled);
 
   useEffect(() => {
     const currentVideoElement = videoRef.current;
@@ -390,6 +391,19 @@ export default function LiveOCRPage(): JSX.Element {
                 >
                   <ScanSearch className="h-4 w-4" />
                   {isScanning ? "Scanning page" : "Scan page"}
+                </button>
+
+                <button
+                  className={[
+                    "flex h-12 items-center gap-2 border px-4 text-sm transition-colors",
+                    voiceOutputEnabled
+                      ? "border-sky-400/60 bg-sky-50 text-sky-700 hover:border-sky-600"
+                      : "border-border text-foreground/50 hover:border-foreground"
+                  ].join(" ")}
+                  onClick={() => setVoiceOutputEnabled((v) => !v)}
+                  type="button"
+                >
+                  {voiceOutputEnabled ? "Voice on" : "Voice off"}
                 </button>
 
                 <div className="min-w-[140px] text-xs uppercase tracking-[0.22em] text-foreground/45">

@@ -212,7 +212,7 @@ function extractImageInput(videoElement: HTMLVideoElement | null, canvas: HTMLCa
   };
 }
 
-export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoElement>): UseLiveOCRAgentResult {
+export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoElement>, voiceOutputEnabled = true): UseLiveOCRAgentResult {
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<AgentStatus>("idle");
   const [scanHistory, setScanHistory] = useState<ScanMemoryEntry[]>([]);
@@ -231,6 +231,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const scanHistoryRef = useRef<ScanMemoryEntry[]>([]);
   const pageContextRef = useRef<string>("");
   const statusRef = useRef<AgentStatus>("idle");
+  const turnInProgressRef = useRef<boolean>(false);
 
   const pageContext = useMemo(() => buildPageContext(scanHistory), [scanHistory]);
 
@@ -264,7 +265,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       return;
     }
 
-    if (statusRef.current === "listening") {
+    if (statusRef.current === "listening" && !turnInProgressRef.current) {
       setStatus("idle");
     }
   }, [isListening]);
@@ -274,6 +275,12 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       setStatus("idle");
     }
   }, [isSpeaking]);
+
+  useEffect(() => {
+    if (!voiceOutputEnabled) {
+      stopSpeaking();
+    }
+  }, [voiceOutputEnabled, stopSpeaking]);
 
   const captureFrame = useCallback((): ImageInput | null => {
     if (!canvasRef.current) {
@@ -295,15 +302,17 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
         const sentence = cleanSpeechText(fullText.slice(nextIndex, boundary));
         if (sentence) {
-          speak(sentence);
-          if (statusRef.current === "thinking") {
-            setStatus("speaking");
+          if (voiceOutputEnabled) {
+            speak(sentence);
+            if (statusRef.current === "thinking") {
+              setStatus("speaking");
+            }
           }
         }
         nextIndex = boundary;
       }
     },
-    [speak]
+    [speak, voiceOutputEnabled]
   );
 
   const sendStudentTurn = useCallback(
@@ -313,6 +322,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
         return;
       }
 
+      turnInProgressRef.current = true;
       baseInterrupt();
       setError(null);
       setStreamingText("");
@@ -376,7 +386,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
         });
 
         const trailingText = cleanSpeechText(fullText.slice(spokenUntil));
-        if (trailingText) {
+        if (trailingText && voiceOutputEnabled) {
           speak(trailingText);
           if (statusRef.current === "thinking") {
             setStatus("speaking");
@@ -391,6 +401,11 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
         }
 
         setStreamingText("");
+        // If voice is off (or response had no speakable content), nothing transitions
+        // status from "thinking" → "idle" via the isSpeaking effect, so do it here.
+        if (statusRef.current === "thinking") {
+          setStatus("idle");
+        }
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === "AbortError") {
           setStreamingText("");
@@ -402,9 +417,11 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
         setError(nextError);
         setStreamingText("");
         setStatus("idle");
+      } finally {
+        turnInProgressRef.current = false;
       }
     },
-    [baseInterrupt, captureFrame, createAbortSignal, exam, speak, speakProgressively]
+    [baseInterrupt, captureFrame, createAbortSignal, exam, speak, speakProgressively, voiceOutputEnabled]
   );
 
   const runDeepScan = useCallback(async (): Promise<boolean> => {

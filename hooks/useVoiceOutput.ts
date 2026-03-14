@@ -10,13 +10,13 @@ interface UseVoiceOutputResult {
 
 /**
  * Splits text into sentences for progressive TTS output.
- * Handles common abbreviations to avoid false splits.
+ * Uses a lookbehind split so trailing unpunctuated text is preserved.
  */
 function splitIntoSentences(text: string): string[] {
-  // Split on sentence-ending punctuation followed by whitespace
-  const raw = text.match(/[^.!?]+[.!?]+[\s]*/g);
-  if (!raw) return text.trim() ? [text.trim()] : [];
-  return raw.map((s) => s.trim()).filter(Boolean);
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const parts = trimmed.split(/(?<=[.!?])\s+/);
+  return parts.map((s) => s.trim()).filter(Boolean);
 }
 
 export function useVoiceOutput(): UseVoiceOutputResult {
@@ -71,6 +71,11 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     (text: string) => {
       if (typeof window === "undefined" || !window.speechSynthesis) return;
 
+      // Chrome bug: synthesis may claim speaking while our queue is empty (stale state)
+      if (window.speechSynthesis.speaking && !activeRef.current) {
+        window.speechSynthesis.cancel();
+      }
+
       const sentences = splitIntoSentences(text);
       if (sentences.length === 0) return;
 
@@ -79,7 +84,8 @@ export function useVoiceOutput(): UseVoiceOutputResult {
       if (!activeRef.current) {
         activeRef.current = true;
         setIsSpeaking(true);
-        speakNext();
+        // Small delay helps Chrome restart synthesis reliably after a cancel
+        setTimeout(speakNext, 50);
       }
     },
     [speakNext]
