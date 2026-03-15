@@ -4,6 +4,8 @@ export interface ConceptEntry {
   stuckCount: number;
   lastMistakeType: string;
   topicName: string;
+  /** Turn index when this topic was last the active concept. Used for stuckCount decay. */
+  lastTurnIndex: number;
 }
 
 export interface SessionTracker {
@@ -15,6 +17,9 @@ export interface SessionTracker {
 }
 
 const PRAISE_WORDS = ["correct", "exactly", "great", "well done", "right", "good", "perfect", "yes", "nicely", "spot on", "that's it"];
+
+/** Number of turns of inactivity before a topic's stuckCount resets to zero. */
+const DECAY_AFTER_TURNS = 5;
 
 export function createSessionTracker(): SessionTracker {
   return {
@@ -40,11 +45,20 @@ export function updateSession(tracker: SessionTracker, userText: string, assista
     tracker.conceptMap[topic] = {
       stuckCount: 0,
       lastMistakeType: "",
-      topicName: topic
+      topicName: topic,
+      lastTurnIndex: tracker.totalTurns
     };
   }
 
   const entry = tracker.conceptMap[topic];
+
+  // Decay: if the student hasn't touched this topic in a while, give them a fresh start.
+  const turnsSinceLastMention = tracker.totalTurns - entry.lastTurnIndex;
+  if (turnsSinceLastMention > DECAY_AFTER_TURNS) {
+    entry.stuckCount = 0;
+  }
+  entry.lastTurnIndex = tracker.totalTurns;
+
   const assistantLower = assistantText.toLowerCase();
   const praised = PRAISE_WORDS.some((word) => assistantLower.includes(word));
 

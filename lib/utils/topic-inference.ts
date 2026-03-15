@@ -7,14 +7,19 @@ const TOPIC_KEYWORDS: Record<string, string[]> = {
   probability: ["probability", "permutation", "combination", "bayes", "random variable", "distribution", "expected value", "binomial", "poisson", "normal distribution", "sample space", "event"]
 };
 
+/** Returns the topic with the most keyword matches, or "general" if none match. */
 export function inferTopic(text: string): string {
   const lower = text.toLowerCase();
+  let bestTopic = "general";
+  let bestCount = 0;
 
   for (const [topic, keywords] of Object.entries(TOPIC_KEYWORDS)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
-      return topic;
+    const count = keywords.filter((kw) => lower.includes(kw)).length;
+    if (count > bestCount) {
+      bestCount = count;
+      bestTopic = topic;
     }
   }
 
-  return "general";
+  return bestTopic;
 }

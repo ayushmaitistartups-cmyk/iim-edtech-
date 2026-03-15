@@ -1,14 +1,23 @@
 import { auth } from "@clerk/nextjs/server";
 import { ConfigurationError, extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
+import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 
 interface OCRRequestBody {
   image?: unknown;
 }
 
+/** ~2 MB decoded — base64 is ~4/3 of binary size, so 2 MB binary ≈ 2.73 MB base64 chars. */
+const MAX_IMAGE_BASE64_LENGTH = 2_800_000;
+
 export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rl = rateLimit(rateLimitKey(userId, "ocr"), { maxRequests: 10, windowMs: 60_000 });
+  if (!rl.success) {
+    return rateLimitResponse(rl.resetMs);
   }
 
   let payload: OCRRequestBody;
@@ -20,6 +29,10 @@ export async function POST(request: Request): Promise<Response> {
 
   if (typeof payload.image !== "string" || payload.image.trim().length === 0) {
     return Response.json({ error: "Field 'image' must be a non-empty string" }, { status: 400 });
+  }
+
+  if (payload.image.length > MAX_IMAGE_BASE64_LENGTH) {
+    return Response.json({ error: "Image too large. Maximum size is 2 MB." }, { status: 413 });
   }
 
   try {
@@ -64,8 +77,7 @@ export async function POST(request: Request): Promise<Response> {
         { status: 429 }
       );
     }
-    
-    // Handle invalid API key or bad request explicitly
+
     if (msg.includes("400") || msg.includes("API key not valid") || msg.includes("INVALID_ARGUMENT")) {
       return Response.json(
         { error: "configuration_error", message: "API Key invalid or permissions missing. Check Google AI Studio settings." },
@@ -74,10 +86,10 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     console.error("OCR processing failed:", error);
-    return Response.json({ 
-      error: "ocr_failed", 
-      message: "OCR processing failed", 
-      details: msg 
+    return Response.json({
+      error: "ocr_failed",
+      message: "OCR processing failed",
+      details: msg
     }, { status: 500 });
   }
 }

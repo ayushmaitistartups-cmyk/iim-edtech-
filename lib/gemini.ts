@@ -55,9 +55,14 @@ export class ConfigurationError extends Error {
   }
 }
 
-function createGenAI(): GoogleGenerativeAI {
-  const rawKey = requiredEnv("GEMINI_API_KEY");
-  return new GoogleGenerativeAI(rawKey.trim());
+let _genAI: GoogleGenerativeAI | null = null;
+
+function getGenAI(): GoogleGenerativeAI {
+  if (!_genAI) {
+    const rawKey = requiredEnv("GEMINI_API_KEY");
+    _genAI = new GoogleGenerativeAI(rawKey.trim());
+  }
+  return _genAI;
 }
 
 function getModel(
@@ -65,7 +70,7 @@ function getModel(
   systemInstruction?: string,
   maxOutputTokens = 1024
 ): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
-  const genAI = createGenAI();
+  const genAI = getGenAI();
   return genAI.getGenerativeModel({
     model: modelName,
     generationConfig: {

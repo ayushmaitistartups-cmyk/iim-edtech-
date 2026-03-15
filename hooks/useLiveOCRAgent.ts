@@ -5,7 +5,6 @@ import { useInterrupt } from "@/hooks/useInterrupt";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { useVoiceOutput } from "@/hooks/useVoiceOutput";
 import { consumeSSE } from "@/lib/sse-client";
-import { buildAdaptiveLiveOCRPrompt } from "@/lib/prompts/live-ocr";
 import { createSessionTracker, updateSession, type SessionTracker } from "@/lib/utils/session-tracker";
 import type { ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
@@ -39,7 +38,6 @@ interface UseLiveOCRAgentResult {
   interrupt: () => void;
 }
 
-const CONTEXT_WINDOW = 6;
 const MIN_WORDS = 3;
 const JPEG_QUALITY = 0.72;
 const MAX_CAPTURE_WIDTH = 960;
@@ -127,20 +125,6 @@ function similarity(a: string, b: string): number {
   }
 
   return same / a.length;
-}
-
-function trimMessages(messages: Message[]): Message[] {
-  if (messages.length <= CONTEXT_WINDOW) {
-    return messages;
-  }
-
-  const first = messages[0];
-  const tail = messages.slice(-CONTEXT_WINDOW);
-  if (tail[0]?.id === first.id) {
-    return tail;
-  }
-
-  return [first, ...tail];
 }
 
 function parseDeepScanCommand(text: string): { followUpText: string | null; shouldScan: boolean } {
@@ -335,10 +319,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       setStatus("thinking");
 
       const session = sessionRef.current;
-      const adaptivePrompt = buildAdaptiveLiveOCRPrompt(exam, {
-        stuckCount: session.conceptMap[session.currentConcept]?.stuckCount ?? 0,
-        currentConcept: session.currentConcept
-      });
+      const stuckCount = session.conceptMap[session.currentConcept]?.stuckCount ?? 0;
 
       try {
         const response = await fetch("/api/chat", {
@@ -348,10 +329,11 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           body: JSON.stringify({
             exam,
             image: captureFrame() ?? undefined,
-            messages: trimMessages(nextMessages),
+            messages: nextMessages,
             mode: "live_ocr_agent",
             ocrText: pageContextRef.current || undefined,
-            systemPrompt: adaptivePrompt
+            stuckCount,
+            currentConcept: session.currentConcept
           })
         });
 

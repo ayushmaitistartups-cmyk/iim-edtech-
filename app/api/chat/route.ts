@@ -1,9 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { isValidMessageList, sseResponse } from "@/lib/api";
 import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
-import { buildLiveOCRAgentPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
+import { buildAdaptiveLiveOCRPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
+import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
 
@@ -13,7 +14,12 @@ interface ChatRequestBody {
   ocrText?: unknown;
   image?: unknown;
   exam?: unknown;
+  stuckCount?: unknown;
+  currentConcept?: unknown;
 }
+
+/** Validated topics that may arrive from the client session tracker. */
+const VALID_CONCEPTS = ["general", "integration", "differentiation", "kinematics", "organic-chemistry", "thermodynamics", "probability"];
 
 const CONTEXT_WINDOW = 8;
 
@@ -94,6 +100,11 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const rl = rateLimit(rateLimitKey(userId, "chat"), { maxRequests: 30, windowMs: 60_000 });
+  if (!rl.success) {
+    return rateLimitResponse(rl.resetMs);
+  }
+
   let payload: ChatRequestBody;
   try {
     payload = (await request.json()) as ChatRequestBody;
@@ -137,7 +148,13 @@ export async function POST(request: Request): Promise<Response> {
     if (!exam) {
       return Response.json({ error: "Invalid exam for live OCR agent mode" }, { status: 400 });
     }
-    systemPrompt = buildLiveOCRAgentPrompt(exam);
+    // stuckCount and currentConcept are sent by the client session tracker.
+    // Cap/validate server-side so the client cannot abuse hint escalation.
+    const rawStuckCount = typeof payload.stuckCount === "number" ? payload.stuckCount : 0;
+    const stuckCount = Math.max(0, Math.min(10, Math.floor(rawStuckCount)));
+    const rawConcept = typeof payload.currentConcept === "string" ? payload.currentConcept : "general";
+    const currentConcept = VALID_CONCEPTS.includes(rawConcept) ? rawConcept : "general";
+    systemPrompt = buildAdaptiveLiveOCRPrompt(exam, { stuckCount, currentConcept });
     maxTokens = 384;
   } else if (mode === "live_ocr") {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
