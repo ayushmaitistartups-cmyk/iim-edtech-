@@ -56,6 +56,8 @@ export default function LiveOCRPage(): JSX.Element {
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera } = useCamera();
   const {
+    alwaysOnVoice,
+    autoScanEnabled,
     error,
     initialized,
     interrupt,
@@ -73,6 +75,8 @@ export default function LiveOCRPage(): JSX.Element {
     stopListening,
     streamingText,
     submitText,
+    toggleAlwaysOnVoice,
+    toggleAutoScan,
     transcript
   } = useLiveOCRAgent(exam, videoRef, voiceOutputEnabled);
 
@@ -186,10 +190,17 @@ export default function LiveOCRPage(): JSX.Element {
                   <span>Deep scan ready</span>
                 </div>
               ) : null}
+              {autoScanEnabled && !quotaExhausted ? (
+                <div className="flex items-center gap-1.5 border border-emerald-300/40 bg-black/45 px-2 py-2 text-[10px] text-emerald-200 backdrop-blur-sm">
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                  Auto-scan
+                </div>
+              ) : null}
               <button
                 className="border border-white/25 bg-black/45 px-3 py-2 text-xs font-medium backdrop-blur-sm hover:bg-black/60 disabled:cursor-not-allowed disabled:opacity-50"
                 disabled={isScanning || quotaExhausted}
                 onClick={() => void scanPage()}
+                title="Scan current page"
                 type="button"
               >
                 {isScanning ? "Scanning..." : "Scan page"}
@@ -197,6 +208,7 @@ export default function LiveOCRPage(): JSX.Element {
               <button
                 className="border border-white/25 bg-black/45 px-3 py-2 text-xs font-medium backdrop-blur-sm hover:bg-black/60"
                 onClick={() => router.push("/exam-select")}
+                title="Change exam"
                 type="button"
               >
                 Change exam
@@ -356,7 +368,9 @@ export default function LiveOCRPage(): JSX.Element {
                       ? "border-green-500 bg-green-50 text-green-600"
                       : status === "thinking" || status === "speaking"
                         ? "border-red-400 bg-red-50 text-red-600"
-                        : "border-border bg-background text-foreground hover:border-foreground",
+                        : alwaysOnVoice
+                          ? "border-sky-500 bg-sky-50 text-sky-600 ring-2 ring-sky-300"
+                          : "border-border bg-background text-foreground hover:border-foreground",
                     !microphoneAvailable ? "cursor-not-allowed opacity-50" : ""
                   ].join(" ")}
                   disabled={!microphoneAvailable}
@@ -371,6 +385,7 @@ export default function LiveOCRPage(): JSX.Element {
                     }
                     startListening();
                   }}
+                  title={status === "listening" ? "Stop listening" : status === "thinking" || status === "speaking" ? "Interrupt" : "Start listening"}
                   type="button"
                 >
                   {status === "thinking" || status === "speaking" ? (
@@ -382,16 +397,48 @@ export default function LiveOCRPage(): JSX.Element {
 
                 <button
                   className={[
-                    "flex h-12 items-center gap-2 border px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                    hasDeepScan ? "border-emerald-400/60 bg-emerald-50 hover:border-emerald-600" : "border-border hover:border-foreground"
+                    "flex h-12 items-center gap-2 border px-3 text-xs font-medium transition-colors",
+                    alwaysOnVoice
+                      ? "border-sky-500 bg-sky-50 text-sky-700 hover:border-sky-700"
+                      : "border-border text-foreground/60 hover:border-foreground"
                   ].join(" ")}
-                  disabled={isScanning || quotaExhausted}
-                  onClick={() => void scanPage()}
+                  disabled={!microphoneAvailable}
+                  onClick={toggleAlwaysOnVoice}
+                  title={alwaysOnVoice ? "Always-on listening active — click to disable" : "Enable always-on listening"}
                   type="button"
                 >
-                  <ScanSearch className="h-4 w-4" />
-                  {isScanning ? "Scanning page" : "Scan page"}
+                  {alwaysOnVoice ? "Always on ●" : "Always on"}
                 </button>
+
+                <div className="flex items-center">
+                  <button
+                    className={[
+                      "flex h-12 items-center gap-2 border px-4 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      hasDeepScan ? "border-emerald-400/60 bg-emerald-50 hover:border-emerald-600" : "border-border hover:border-foreground"
+                    ].join(" ")}
+                    disabled={isScanning || quotaExhausted}
+                    onClick={() => void scanPage()}
+                    title="Scan current page now"
+                    type="button"
+                  >
+                    <ScanSearch className="h-4 w-4" />
+                    {isScanning ? "Scanning page" : "Scan now"}
+                  </button>
+                  <button
+                    className={[
+                      "flex h-12 items-center border-b border-r border-t px-2 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                      autoScanEnabled
+                        ? "border-emerald-400/60 bg-emerald-50 text-emerald-700 hover:border-emerald-600"
+                        : "border-border text-foreground/40 hover:border-foreground"
+                    ].join(" ")}
+                    disabled={quotaExhausted}
+                    onClick={toggleAutoScan}
+                    title={autoScanEnabled ? "Auto-scan is on (every 8s) — click to disable" : "Enable auto-scan"}
+                    type="button"
+                  >
+                    {autoScanEnabled ? "Auto ●" : "Auto"}
+                  </button>
+                </div>
 
                 <button
                   className={[
@@ -439,6 +486,7 @@ export default function LiveOCRPage(): JSX.Element {
                   value={textInput}
                 />
                 <button
+                  aria-label="Send message"
                   className="flex h-12 w-12 items-center justify-center border border-foreground bg-foreground text-background disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={status === "thinking" || textInput.trim().length === 0}
                   onClick={() => {

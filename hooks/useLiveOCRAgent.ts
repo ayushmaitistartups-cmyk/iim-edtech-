@@ -18,24 +18,28 @@ interface ScanMemoryEntry {
 }
 
 interface UseLiveOCRAgentResult {
+  alwaysOnVoice: boolean;
+  autoScanEnabled: boolean;
   error: string | null;
   initialized: boolean;
+  interrupt: () => void;
   isScanning: boolean;
   lastScanAt: number | null;
   messages: Message[];
   microphoneAvailable: boolean;
   pageContext: string;
   quotaExhausted: boolean;
-  scanPage: () => Promise<void>;
   scanHistory: ScanMemoryEntry[];
+  scanPage: () => Promise<void>;
   scanSummary: string | null;
   startListening: () => void;
   status: AgentStatus;
   stopListening: () => void;
   streamingText: string;
   submitText: (text: string) => Promise<void>;
+  toggleAlwaysOnVoice: () => void;
+  toggleAutoScan: () => void;
   transcript: string;
-  interrupt: () => void;
 }
 
 const MIN_WORDS = 3;
@@ -44,6 +48,9 @@ const MAX_CAPTURE_WIDTH = 960;
 const MAX_CAPTURE_HEIGHT = 720;
 const MAX_SCAN_MEMORY_PAGES = 4;
 const SAME_PAGE_SIMILARITY_THRESHOLD = 0.985;
+const AUTO_SCAN_INTERVAL_MS = 8000;
+const AUTO_SCAN_MIN_TEXT_LENGTH = 20;
+const ALWAYS_ON_RESTART_DELAY_MS = 600;
 
 const DEEP_SCAN_PREFIX = String.raw`(?:can you\s+|could you\s+|would you\s+|please\s+)?(?:scan|read|analy[sz]e|look at)\s+(?:this|the)\s+(?:page|sheet|notebook|problem|question)`;
 const DEEP_SCAN_EXACT_PATTERN = new RegExp(`^${DEEP_SCAN_PREFIX}(?:\s+for me)?(?:\s+please)?[.!?]*$`, "i");
@@ -207,6 +214,8 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const [lastScanAt, setLastScanAt] = useState<number | null>(null);
   const [quotaExhausted, setQuotaExhausted] = useState<boolean>(false);
   const [scanSummary, setScanSummary] = useState<string | null>(null);
+  const [alwaysOnVoice, setAlwaysOnVoice] = useState(false);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const messagesRef = useRef<Message[]>([]);
@@ -216,6 +225,13 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const pageContextRef = useRef<string>("");
   const statusRef = useRef<AgentStatus>("idle");
   const turnInProgressRef = useRef<boolean>(false);
+  const alwaysOnRef = useRef(false);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isAutoScanningRef = useRef(false);
+  // Shadow volatile state in refs so runAutoScan stays a stable callback.
+  const isScanningRef = useRef(false);
+  const quotaExhaustedRef = useRef(false);
 
   const pageContext = useMemo(() => buildPageContext(scanHistory), [scanHistory]);
 
@@ -244,6 +260,18 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   }, [status]);
 
   useEffect(() => {
+    alwaysOnRef.current = alwaysOnVoice;
+  }, [alwaysOnVoice]);
+
+  useEffect(() => {
+    isScanningRef.current = isScanning;
+  }, [isScanning]);
+
+  useEffect(() => {
+    quotaExhaustedRef.current = quotaExhausted;
+  }, [quotaExhausted]);
+
+  useEffect(() => {
     if (isListening) {
       setStatus("listening");
       return;
@@ -265,6 +293,31 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       stopSpeaking();
     }
   }, [voiceOutputEnabled, stopSpeaking]);
+
+  // Always-on voice: restart listening after each reply cycle.
+  useEffect(() => {
+    if (status === "idle" && alwaysOnRef.current && !isListening) {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = setTimeout(() => {
+        if (statusRef.current === "idle" && alwaysOnRef.current) {
+          startListening();
+        }
+      }, ALWAYS_ON_RESTART_DELAY_MS);
+    }
+
+    return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    };
+  }, [status, isListening, startListening]);
+
+  // Cleanup timers and flags on unmount.
+  useEffect(() => {
+    return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      if (autoScanIntervalRef.current) clearInterval(autoScanIntervalRef.current);
+      alwaysOnRef.current = false;
+    };
+  }, []);
 
   const captureFrame = useCallback((): ImageInput | null => {
     if (!canvasRef.current) {
@@ -508,6 +561,91 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     }
   }, [captureFrame, isScanning]);
 
+  // Silent background OCR — updates page context without interrupting conversation.
+  const runAutoScan = useCallback(async (): Promise<void> => {
+    if (quotaExhaustedRef.current || isScanningRef.current || turnInProgressRef.current || isAutoScanningRef.current) {
+      return;
+    }
+
+    const frame = captureFrame();
+    if (!frame) return;
+
+    try {
+      const currentHash = await hashFrame(frame.base64);
+      if (lastScanHashRef.current && similarity(lastScanHashRef.current, currentHash) >= SAME_PAGE_SIMILARITY_THRESHOLD) {
+        return; // page hasn't changed
+      }
+      lastScanHashRef.current = currentHash;
+    } catch {
+      return;
+    }
+
+    isAutoScanningRef.current = true;
+    try {
+      const response = await fetch("/api/ocr", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: frame.base64 })
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          const p = (await response.json().catch(() => ({}))) as { error?: string };
+          if (p.error === "quota_exhausted") {
+            setQuotaExhausted(true);
+          }
+        }
+        return;
+      }
+
+      const payload = (await response.json()) as { text?: string };
+      const nextText = payload.text?.trim() ?? "";
+      if (!nextText || nextText.length < AUTO_SCAN_MIN_TEXT_LENGTH) return;
+
+      const lastEntry = scanHistoryRef.current[scanHistoryRef.current.length - 1];
+      if (lastEntry?.text === nextText) return;
+
+      const scannedAt = Date.now();
+      const nextHistory = [
+        ...scanHistoryRef.current,
+        buildScanMemoryEntry(nextText, scannedAt)
+      ].slice(-MAX_SCAN_MEMORY_PAGES);
+
+      scanHistoryRef.current = nextHistory;
+      setScanHistory(nextHistory);
+      setLastScanAt(scannedAt);
+      setInitialized(true);
+    } catch {
+      // Silent failure — auto-scan must never disrupt the UX.
+    } finally {
+      isAutoScanningRef.current = false;
+    }
+  }, [captureFrame]);
+
+  // Start/stop the auto-scan interval when enabled or quota state changes.
+  useEffect(() => {
+    if (!autoScanEnabled || quotaExhausted) {
+      if (autoScanIntervalRef.current) {
+        clearInterval(autoScanIntervalRef.current);
+        autoScanIntervalRef.current = null;
+      }
+      return;
+    }
+
+    autoScanIntervalRef.current = setInterval(() => {
+      void runAutoScan();
+    }, AUTO_SCAN_INTERVAL_MS);
+
+    // First scan after a short delay (give the camera time to initialise).
+    const initialTimer = setTimeout(() => void runAutoScan(), 2000);
+
+    return () => {
+      if (autoScanIntervalRef.current) clearInterval(autoScanIntervalRef.current);
+      clearTimeout(initialTimer);
+      autoScanIntervalRef.current = null;
+    };
+  }, [autoScanEnabled, quotaExhausted, runAutoScan]);
+
   const submitText = useCallback(
     async (rawText: string): Promise<void> => {
       const trimmed = rawText.trim();
@@ -539,8 +677,29 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     setStatus("idle");
   }, [baseInterrupt]);
 
+  const toggleAlwaysOnVoice = useCallback(() => {
+    setAlwaysOnVoice((prev) => {
+      const next = !prev;
+      if (!next) {
+        stopListening();
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      } else {
+        if (statusRef.current === "idle") {
+          setTimeout(() => startListening(), 200);
+        }
+      }
+      return next;
+    });
+  }, [stopListening, startListening]);
+
+  const toggleAutoScan = useCallback(() => {
+    setAutoScanEnabled((prev) => !prev);
+  }, []);
+
   return useMemo(
     () => ({
+      alwaysOnVoice,
+      autoScanEnabled,
       error,
       initialized,
       interrupt,
@@ -550,17 +709,21 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       microphoneAvailable: isSupported,
       pageContext,
       quotaExhausted,
-      scanPage,
       scanHistory,
+      scanPage,
       scanSummary,
       startListening,
       status,
       stopListening,
       streamingText,
       submitText,
+      toggleAlwaysOnVoice,
+      toggleAutoScan,
       transcript,
     }),
     [
+      alwaysOnVoice,
+      autoScanEnabled,
       error,
       initialized,
       interrupt,
@@ -570,14 +733,16 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       messages,
       pageContext,
       quotaExhausted,
-      scanPage,
       scanHistory,
+      scanPage,
       scanSummary,
       startListening,
       status,
       stopListening,
       streamingText,
       submitText,
+      toggleAlwaysOnVoice,
+      toggleAutoScan,
       transcript
     ]
   );

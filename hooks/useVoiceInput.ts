@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 interface UseVoiceInputOptions {
   onTranscript?: (text: string) => void;
+  onEnd?: () => void;
 }
 
 interface UseVoiceInputResult {
@@ -56,10 +57,15 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
   const [error, setError] = useState<string>("");
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const onTranscriptRef = useRef(options.onTranscript);
+  const onEndRef = useRef(options.onEnd);
 
   useEffect(() => {
     onTranscriptRef.current = options.onTranscript;
   }, [options.onTranscript]);
+
+  useEffect(() => {
+    onEndRef.current = options.onEnd;
+  }, [options.onEnd]);
 
   const isSupported = typeof window !== "undefined" && getSpeechRecognition() !== null;
 
@@ -121,6 +127,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     recognition.onend = () => {
       setIsListening(false);
       recognitionRef.current = null;
+      onEndRef.current?.();
     };
 
     recognitionRef.current = recognition;
