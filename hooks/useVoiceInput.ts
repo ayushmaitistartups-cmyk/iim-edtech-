@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  SpeechRecognitionConstructor,
+  SpeechRecognitionErrorEvent,
+  SpeechRecognitionEvent,
+  SpeechRecognitionInstance,
+} from "@/types/speech";
 
 interface UseVoiceInputOptions {
   onTranscript?: (text: string) => void;
@@ -14,34 +20,6 @@ interface UseVoiceInputResult {
   startListening: () => void;
   stopListening: () => void;
   error: string;
-}
-
-// Web Speech API types for cross-browser compatibility
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-  resultIndex: number;
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
-  error: string;
-  message: string;
-}
-
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onstart: ((ev: Event) => void) | null;
-  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
-  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
-  onend: ((ev: Event) => void) | null;
-}
-
-interface SpeechRecognitionConstructor {
-  new(): SpeechRecognitionInstance;
 }
 
 function getSpeechRecognition(): SpeechRecognitionConstructor | null {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { Camera, CheckCircle2, Mic, ScanSearch, Send, Square } from "lucide-react";
@@ -10,6 +10,7 @@ import { StreamingText } from "@/components/chat/StreamingText";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { useCamera } from "@/hooks/useCamera";
 import { useLiveOCRAgent } from "@/hooks/useLiveOCRAgent";
+import { useWakeWord } from "@/hooks/useWakeWord";
 import { AGENT_OPENERS, type ExamType } from "@/types/exam";
 
 const VALID_EXAMS: readonly ExamType[] = ["CAT", "GMAT", "NEET", "UPSC", "JEE"];
@@ -51,8 +52,11 @@ export default function LiveOCRPage(): JSX.Element {
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const wakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [textInput, setTextInput] = useState<string>("");
   const [voiceOutputEnabled, setVoiceOutputEnabled] = useState(true);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
+  const [justWoke, setJustWoke] = useState(false);
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera } = useCamera();
   const {
@@ -79,6 +83,38 @@ export default function LiveOCRPage(): JSX.Element {
     toggleAutoScan,
     transcript
   } = useLiveOCRAgent(exam, videoRef, voiceOutputEnabled);
+
+  const wakeWordShouldRun =
+    wakeWordEnabled &&
+    status === "idle" &&
+    !isScanning &&
+    microphoneAvailable;
+
+  const handleWakeWord = useCallback(() => {
+    setJustWoke(true);
+    setTimeout(() => setJustWoke(false), 2000);
+    if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+    wakeTimerRef.current = setTimeout(() => startListening(), 350);
+  }, [startListening]);
+
+  // Clean up the deferred startListening call on unmount
+  useEffect(() => {
+    return () => {
+      if (wakeTimerRef.current) clearTimeout(wakeTimerRef.current);
+    };
+  }, []);
+
+  const handleWakeWordToggle = useCallback(() => {
+    setWakeWordEnabled((prev) => {
+      if (!prev && alwaysOnVoice) toggleAlwaysOnVoice();
+      return !prev;
+    });
+  }, [alwaysOnVoice, toggleAlwaysOnVoice]);
+
+  const { isListeningForWake, isSupported: wakeSupported } = useWakeWord({
+    enabled: wakeWordShouldRun,
+    onWakeWord: handleWakeWord,
+  });
 
   useEffect(() => {
     const currentVideoElement = videoRef.current;
@@ -240,6 +276,20 @@ export default function LiveOCRPage(): JSX.Element {
             ) : null}
           </AnimatePresence>
 
+          <AnimatePresence>
+            {isListeningForWake && !scanSummary ? (
+              <motion.div
+                animate={{ opacity: 1 }}
+                className="absolute left-3 top-20 flex items-center gap-2 border border-violet-300/40 bg-black/50 px-3 py-1 text-xs text-violet-200 backdrop-blur-sm"
+                exit={{ opacity: 0 }}
+                initial={{ opacity: 0 }}
+              >
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
+                Say &ldquo;hello bro&rdquo;
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+
           <div className="absolute bottom-3 left-3 right-3 grid gap-3 md:grid-cols-[1.2fr_0.8fr]">
             <div className="border border-white/15 bg-black/65 p-3 text-white backdrop-blur-sm">
               <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">Current frame context</p>
@@ -334,6 +384,19 @@ export default function LiveOCRPage(): JSX.Element {
             </div>
 
             <AnimatePresence>
+              {justWoke ? (
+                <motion.div
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mx-4 mb-2 border border-violet-300 bg-violet-50 px-3 py-2 text-sm font-medium text-violet-800"
+                  exit={{ opacity: 0, y: 8 }}
+                  initial={{ opacity: 0, y: 8 }}
+                >
+                  Wake word heard — listening now...
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence>
               {transcript ? (
                 <motion.div
                   animate={{ opacity: 1, y: 0 }}
@@ -403,12 +466,33 @@ export default function LiveOCRPage(): JSX.Element {
                       : "border-border text-foreground/60 hover:border-foreground"
                   ].join(" ")}
                   disabled={!microphoneAvailable}
-                  onClick={toggleAlwaysOnVoice}
+                  onClick={() => {
+                    if (wakeWordEnabled) setWakeWordEnabled(false);
+                    toggleAlwaysOnVoice();
+                  }}
                   title={alwaysOnVoice ? "Always-on listening active — click to disable" : "Enable always-on listening"}
                   type="button"
                 >
                   {alwaysOnVoice ? "Always on ●" : "Always on"}
                 </button>
+
+                {wakeSupported ? (
+                  <button
+                    className={[
+                      "flex h-12 items-center gap-2 border px-3 text-xs font-medium transition-colors",
+                      wakeWordEnabled
+                        ? "border-violet-400/70 bg-violet-50 text-violet-700 hover:border-violet-600"
+                        : "border-border text-foreground/60 hover:border-foreground",
+                      !microphoneAvailable ? "cursor-not-allowed opacity-40" : ""
+                    ].join(" ")}
+                    disabled={!microphoneAvailable}
+                    onClick={handleWakeWordToggle}
+                    title='Say "hello bro" to activate without touching the mic button'
+                    type="button"
+                  >
+                    {wakeWordEnabled ? "Wake word ●" : "Wake word"}
+                  </button>
+                ) : null}
 
                 <div className="flex items-center">
                   <button
