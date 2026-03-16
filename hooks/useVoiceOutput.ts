@@ -8,6 +8,11 @@ interface UseVoiceOutputResult {
   isSpeaking: boolean;
 }
 
+/** Minimum safety timeout per utterance (ms). */
+const MIN_UTTERANCE_TIMEOUT_MS = 5_000;
+/** Milliseconds per character for estimating max speech duration. */
+const MS_PER_CHARACTER = 80;
+
 /**
  * Splits text into sentences for progressive TTS output.
  * Uses a lookbehind split so trailing unpunctuated text is preserved.
@@ -23,8 +28,15 @@ export function useVoiceOutput(): UseVoiceOutputResult {
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const queueRef = useRef<string[]>([]);
   const activeRef = useRef<boolean>(false);
+  const safetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const speakNext = useCallback(() => {
+    // Clear previous safety timer
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current);
+      safetyTimerRef.current = null;
+    }
+
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
     if (queueRef.current.length === 0) {
@@ -53,10 +65,18 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     utterance.pitch = 1.0;
 
     utterance.onend = () => {
+      if (safetyTimerRef.current) {
+        clearTimeout(safetyTimerRef.current);
+        safetyTimerRef.current = null;
+      }
       speakNext();
     };
 
     utterance.onerror = (event) => {
+      if (safetyTimerRef.current) {
+        clearTimeout(safetyTimerRef.current);
+        safetyTimerRef.current = null;
+      }
       if (event.error === "canceled" || event.error === "interrupted") {
         // Normal cancellation — not an error
         return;
@@ -65,6 +85,14 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     };
 
     window.speechSynthesis.speak(utterance);
+
+    // Safety timeout: if onend never fires (Chrome bug), force-advance
+    const timeoutMs = Math.max(MIN_UTTERANCE_TIMEOUT_MS, clean.length * MS_PER_CHARACTER);
+    safetyTimerRef.current = setTimeout(() => {
+      safetyTimerRef.current = null;
+      window.speechSynthesis.cancel();
+      speakNext();
+    }, timeoutMs);
   }, []);
 
   const speak = useCallback(
@@ -94,6 +122,10 @@ export function useVoiceOutput(): UseVoiceOutputResult {
   const stop = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current);
+      safetyTimerRef.current = null;
+    }
     queueRef.current = [];
     activeRef.current = false;
     window.speechSynthesis.cancel();

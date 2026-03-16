@@ -164,17 +164,27 @@ export async function POST(request: Request): Promise<Response> {
     maxTokens = 1024;
   }
 
+  const MAX_STREAM_DURATION_MS = 60_000;
+
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     let hasTokens = false;
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify("Response generation timed out. Please try again.")}\n\n`)
+      );
+    }, MAX_STREAM_DURATION_MS);
 
     try {
       for await (const token of streamChat(baseMessages, systemPrompt, image, maxTokens)) {
+        if (timedOut) break;
         hasTokens = true;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
       }
 
-      if (!hasTokens) {
+      if (!hasTokens && !timedOut) {
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
         );
@@ -200,6 +210,8 @@ export async function POST(request: Request): Promise<Response> {
       }
 
       throw error;
+    } finally {
+      clearTimeout(deadline);
     }
   });
 }

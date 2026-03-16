@@ -346,11 +346,13 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       const session = sessionRef.current;
       const stuckCount = session.conceptMap[session.currentConcept]?.stuckCount ?? 0;
 
+      const signal = createAbortSignal();
+
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: createAbortSignal(),
+          signal,
           body: JSON.stringify({
             exam,
             image: captureFrame() ?? undefined,
@@ -390,7 +392,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           fullText += token;
           setStreamingText(fullText);
           spokenUntil = speakProgressively(fullText, spokenUntil);
-        });
+        }, signal);
 
         const trailingText = cleanSpeechText(fullText.slice(spokenUntil));
         if (trailingText && voiceOutputEnabled) {
@@ -461,6 +463,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       const response = await fetch("/api/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(25_000),
         body: JSON.stringify({ image: frame.base64 })
       });
 
@@ -557,6 +560,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       const response = await fetch("/api/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(20_000),
         body: JSON.stringify({ image: frame.base64 })
       });
 

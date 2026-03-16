@@ -160,7 +160,7 @@ export function ConversationPanel({
             fullText += data;
             setStreamingText(fullText);
           }
-        });
+        }, signal);
 
         // Speak any remaining text
         const remaining = fullText.slice(lastSpokenIndex).trim();

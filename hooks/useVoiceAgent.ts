@@ -157,12 +157,13 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
           : newMessages;
 
       abortRef.current = new AbortController();
+      const signal = AbortSignal.any([abortRef.current.signal, AbortSignal.timeout(90_000)]);
 
       try {
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: abortRef.current.signal,
+          signal,
           body: JSON.stringify({
             messages: trimmedMsgs,
             exam,
@@ -196,7 +197,12 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
         let buffer = "";
 
         while (true) {
-          const { done, value } = await reader.read();
+          const { done, value } = await Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("Server response timed out. Please try again.")), 20_000)
+            ),
+          ]);
           if (done) break;
 
           const chunk = decoder.decode(value);

@@ -20,6 +20,12 @@ function stripDataUrlPrefix(input: string): string {
 /** Max number of recent messages retained, plus the first context seed message. */
 const MAX_CONTEXT_MESSAGES = 8;
 
+/** Timeout for non-streaming OCR requests (ms). */
+const GEMINI_OCR_TIMEOUT_MS = 25_000;
+
+/** Maximum time to wait for any single chunk during streaming (ms). */
+const GEMINI_CHUNK_TIMEOUT_MS = 15_000;
+
 /** Models to try in order — if one hits quota, fall back to the next. */
 const MODEL_PRIORITY = [
   "gemini-2.5-flash-lite",
@@ -190,7 +196,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
   for (const modelName of MODEL_PRIORITY) {
     try {
       const model = getModel(modelName, undefined, 512);
-      const result = await withRetry(() => model.generateContent(content));
+      const result = await withRetry(() => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS }));
       return result.response.text().trim();
     } catch (error) {
       if (isQuotaError(error)) {
@@ -225,6 +231,24 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
 
 function toGeminiRole(role: Message["role"]): "user" | "model" {
   return role === "assistant" ? "model" : "user";
+}
+
+/** Wraps an async iterable so each .next() call has a per-chunk timeout. */
+async function* iterateWithChunkTimeout<T>(
+  stream: AsyncIterable<T>,
+  timeoutMs: number
+): AsyncGenerator<T> {
+  const iterator = stream[Symbol.asyncIterator]();
+  while (true) {
+    const result = await Promise.race([
+      iterator.next(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Gemini stream chunk timed out")), timeoutMs)
+      ),
+    ]);
+    if (result.done) break;
+    yield result.value;
+  }
 }
 
 export async function* streamChat(
@@ -270,7 +294,7 @@ export async function* streamChat(
       const chat = model.startChat({ history: historyParts });
       const result = await withRetry(() => chat.sendMessageStream(parts));
 
-      for await (const chunk of result.stream) {
+      for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
         try {
           const text = chunk.text();
           if (text) {
