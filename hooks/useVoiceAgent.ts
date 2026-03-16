@@ -104,6 +104,30 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
     setMicrophoneAvailable(!!SR);
   }, []);
 
+  const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
+  // Set up voice selection with voiceschanged listener (needed for Safari/iOS)
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+
+    const pickVoice = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+      voiceRef.current =
+        voices.find((v) => v.lang === language) ??
+        voices.find((v) => v.name.includes("Google") && v.lang.startsWith("en")) ??
+        voices.find((v) => v.lang === "en-US") ??
+        voices.find((v) => v.lang.startsWith("en")) ??
+        null;
+    };
+
+    pickVoice();
+    window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
+    };
+  }, [language]);
+
   const speakSentence = useCallback((text: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
@@ -121,12 +145,8 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
 
-    const voices = window.speechSynthesis.getVoices();
-    const preferred = voices.find(
-      (v) => v.lang === language || v.name.includes("Google") || v.name.includes("Rishi")
-    );
-    if (preferred) {
-      utterance.voice = preferred;
+    if (voiceRef.current) {
+      utterance.voice = voiceRef.current;
     }
 
     window.speechSynthesis.speak(utterance);
@@ -195,6 +215,7 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
         const decoder = new TextDecoder();
         let fullResponse = "";
         let buffer = "";
+        let spokenSentenceCount = 0;
 
         while (true) {
           const { done, value } = await Promise.race([
@@ -217,11 +238,12 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
                 const json = JSON.parse(token);
                 fullResponse += json;
 
-                // Split into sentences and speak progressively
+                // Speak only NEW complete sentences (not the last partial one)
                 const sentences = splitIntoSentences(fullResponse);
-                sentences.forEach((sentence) => {
-                  if (sentence) speakSentence(sentence);
-                });
+                for (let s = spokenSentenceCount; s < sentences.length - 1; s++) {
+                  speakSentence(sentences[s]);
+                }
+                spokenSentenceCount = Math.max(spokenSentenceCount, sentences.length - 1);
               } catch {
                 // Invalid JSON token, skip
               }
@@ -237,14 +259,16 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
             try {
               const json = JSON.parse(token);
               fullResponse += json;
-              const sentences = splitIntoSentences(fullResponse);
-              sentences.forEach((sentence) => {
-                if (sentence) speakSentence(sentence);
-              });
             } catch {
               // Invalid JSON token, skip
             }
           }
+        }
+
+        // Speak any remaining unspoken sentences
+        const finalSentences = splitIntoSentences(fullResponse);
+        for (let s = spokenSentenceCount; s < finalSentences.length; s++) {
+          speakSentence(finalSentences[s]);
         }
 
         const newMsgs = [...messagesRef.current, buildMessage("assistant", fullResponse)];

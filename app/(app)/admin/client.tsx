@@ -27,6 +27,7 @@ interface ScanRecord {
   brightness: number;
   sharpness: number;
   processingMs: number;
+  imageDataUrl: string;
 }
 
 interface FrameMetrics {
@@ -117,6 +118,7 @@ export default function AdminClient({ adminEmail }: { adminEmail: string }): JSX
   const [scanRecords, setScanRecords] = useState<ScanRecord[]>([]);
   const [scanning, setScanning] = useState(false);
   const [autoOcr, setAutoOcr] = useState(false);
+  const [selectedScan, setSelectedScan] = useState<ScanRecord | null>(null);
 
   // — Logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -294,6 +296,7 @@ export default function AdminClient({ adminEmail }: { adminEmail: string }): JSX
     if (!silent) addLog("info", `Running OCR on frame #${frameNo}…`);
     const t0 = Date.now();
     const base64 = canvas.toDataURL("image/jpeg", 0.85);
+    const snapshotUrl = canvas.toDataURL("image/jpeg", 0.65);
     try {
       const res = await fetch("/api/ocr", {
         method: "POST",
@@ -329,6 +332,7 @@ export default function AdminClient({ adminEmail }: { adminEmail: string }): JSX
           brightness: an.brightness,
           sharpness: an.sharpness,
           processingMs,
+          imageDataUrl: snapshotUrl,
         },
         ...prev.slice(0, 19),
       ]);
@@ -610,40 +614,57 @@ export default function AdminClient({ adminEmail }: { adminEmail: string }): JSX
                 ) : (
                   scanRecords.map((r) => (
                     <div key={r.id} className="px-4 py-3 hover:bg-zinc-900/40 transition-colors">
-                      <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                        <span className="text-[9px] font-mono text-zinc-600">
-                          #{r.frameNo}
-                        </span>
-                        <span className={["text-[9px] border px-2 py-0.5 uppercase tracking-widest", qualityBadge(r.quality)].join(" ")}>
-                          {r.quality}
-                        </span>
-                        <span className="text-[9px] text-zinc-600 font-mono">
-                          {r.charCount} chars · {r.processingMs}ms
-                        </span>
-                        <span className="text-[9px] font-mono text-zinc-700 ml-auto">
-                          {new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(r.capturedAt)}
-                        </span>
-                      </div>
-                      {r.ocrText ? (
-                        <p className="text-[11px] text-zinc-300 font-mono leading-5 whitespace-pre-wrap break-words">
-                          {r.ocrText.slice(0, 280)}{r.ocrText.length > 280 ? "…" : ""}
-                        </p>
-                      ) : (
-                        <p className="text-[11px] text-zinc-600 italic">No text detected</p>
-                      )}
-                      <div className="flex gap-4 mt-2">
-                        {[
-                          { label: "Brightness", val: r.brightness },
-                          { label: "Sharpness", val: r.sharpness },
-                        ].map((m) => (
-                          <div key={m.label} className="flex items-center gap-1.5">
-                            <span className="text-[8px] text-zinc-600 uppercase tracking-widest">{m.label}</span>
-                            <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
-                              <div className={["h-full rounded-full", qBar(m.val)].join(" ")} style={{ width: `${m.val}%` }} />
-                            </div>
-                            <span className="text-[8px] font-mono text-zinc-500">{m.val}</span>
+                      <div className="flex gap-3">
+                        {/* Thumbnail */}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedScan(r)}
+                          className="flex-shrink-0 border border-zinc-700 hover:border-zinc-500 transition-colors"
+                          title="Click to enlarge"
+                        >
+                          <img
+                            src={r.imageDataUrl}
+                            alt={`Scan #${r.frameNo}`}
+                            className="w-20 h-[60px] object-cover"
+                          />
+                        </button>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                            <span className="text-[9px] font-mono text-zinc-600">
+                              #{r.frameNo}
+                            </span>
+                            <span className={["text-[9px] border px-2 py-0.5 uppercase tracking-widest", qualityBadge(r.quality)].join(" ")}>
+                              {r.quality}
+                            </span>
+                            <span className="text-[9px] text-zinc-600 font-mono">
+                              {r.charCount} chars · {r.processingMs}ms
+                            </span>
+                            <span className="text-[9px] font-mono text-zinc-700 ml-auto">
+                              {new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(r.capturedAt)}
+                            </span>
                           </div>
-                        ))}
+                          {r.ocrText ? (
+                            <p className="text-[11px] text-zinc-300 font-mono leading-5 whitespace-pre-wrap break-words">
+                              {r.ocrText.slice(0, 280)}{r.ocrText.length > 280 ? "…" : ""}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-zinc-600 italic">No text detected</p>
+                          )}
+                          <div className="flex gap-4 mt-2">
+                            {[
+                              { label: "Brightness", val: r.brightness },
+                              { label: "Sharpness", val: r.sharpness },
+                            ].map((m) => (
+                              <div key={m.label} className="flex items-center gap-1.5">
+                                <span className="text-[8px] text-zinc-600 uppercase tracking-widest">{m.label}</span>
+                                <div className="w-16 h-1 bg-zinc-800 rounded-full overflow-hidden">
+                                  <div className={["h-full rounded-full", qBar(m.val)].join(" ")} style={{ width: `${m.val}%` }} />
+                                </div>
+                                <span className="text-[8px] font-mono text-zinc-500">{m.val}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -898,6 +919,69 @@ export default function AdminClient({ adminEmail }: { adminEmail: string }): JSX
           </p>
         </div>
       </div>
+
+      {/* ── Image preview modal ────────────────────────── */}
+      {selectedScan && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm p-4"
+          onClick={() => setSelectedScan(null)}
+          onKeyDown={(e) => { if (e.key === "Escape") setSelectedScan(null); }}
+          role="button"
+          tabIndex={0}
+        >
+          <div
+            className="max-w-4xl w-full max-h-[90vh] overflow-y-auto bg-[#0C0F16] border border-zinc-700"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono text-zinc-500">Frame #{selectedScan.frameNo}</span>
+                <span className={["text-[9px] border px-2 py-0.5 uppercase tracking-widest", qualityBadge(selectedScan.quality)].join(" ")}>
+                  {selectedScan.quality}
+                </span>
+                <span className="text-[9px] font-mono text-zinc-600">
+                  {selectedScan.charCount} chars · {selectedScan.processingMs}ms
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedScan(null)}
+                className="text-zinc-500 hover:text-zinc-300 text-sm px-2 py-1 border border-zinc-700 hover:border-zinc-500 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+            <img
+              src={selectedScan.imageDataUrl}
+              alt={`Full scan #${selectedScan.frameNo}`}
+              className="w-full"
+            />
+            {selectedScan.ocrText && (
+              <div className="px-4 py-3 border-t border-zinc-800">
+                <p className="text-[9px] uppercase tracking-[0.28em] text-zinc-500 mb-2">Extracted text</p>
+                <p className="text-[11px] text-zinc-300 font-mono leading-5 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">
+                  {selectedScan.ocrText}
+                </p>
+              </div>
+            )}
+            <div className="px-4 py-3 border-t border-zinc-800 flex gap-6">
+              {[
+                { label: "Brightness", val: selectedScan.brightness },
+                { label: "Sharpness", val: selectedScan.sharpness },
+              ].map((m) => (
+                <div key={m.label} className="flex items-center gap-2">
+                  <span className="text-[9px] text-zinc-500 uppercase tracking-widest">{m.label}</span>
+                  <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                    <div className={["h-full rounded-full", qBar(m.val)].join(" ")} style={{ width: `${m.val}%` }} />
+                  </div>
+                  <span className="text-[9px] font-mono text-zinc-400">{m.val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

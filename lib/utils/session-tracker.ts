@@ -32,7 +32,37 @@ const PRAISE_PHRASES = [
 ];
 
 /** Number of turns of inactivity before a topic's stuckCount resets to zero. */
-const DECAY_AFTER_TURNS = 5;
+const DECAY_AFTER_TURNS = 3;
+
+/** Phrases that signal the student is struggling (used to decide stuckCount increment). */
+const STRUGGLE_SIGNALS = [
+  "stuck",
+  "don't understand",
+  "dont understand",
+  "don't get it",
+  "dont get it",
+  "confused",
+  "help me",
+  "what do i do",
+  "how do i",
+  "i'm lost",
+  "im lost",
+  "wrong",
+  "not sure",
+  "no idea",
+  "can you explain",
+  "i don't know",
+  "i dont know",
+  "still stuck",
+  "hint",
+];
+
+function looksStuck(userText: string): boolean {
+  const lower = userText.toLowerCase();
+  // Short follow-ups (< 6 words) are likely confused responses
+  if (lower.split(/\s+/).length < 6) return true;
+  return STRUGGLE_SIGNALS.some((signal) => lower.includes(signal));
+}
 
 export function createSessionTracker(): SessionTracker {
   return {
@@ -47,7 +77,8 @@ export function createSessionTracker(): SessionTracker {
 export function updateSession(tracker: SessionTracker, userText: string, assistantText: string): void {
   tracker.totalTurns += 1;
 
-  const topic = inferTopic(userText, tracker.currentConcept);
+  const previousTopic = tracker.currentConcept;
+  const topic = inferTopic(userText, previousTopic);
   tracker.currentConcept = topic;
 
   if (!tracker.topicsAttempted.includes(topic)) {
@@ -70,6 +101,12 @@ export function updateSession(tracker: SessionTracker, userText: string, assista
   if (turnsSinceLastMention > DECAY_AFTER_TURNS) {
     entry.stuckCount = 0;
   }
+
+  // Reset when switching to a genuinely different topic.
+  if (topic !== previousTopic && topic !== "general") {
+    entry.stuckCount = 0;
+  }
+
   entry.lastTurnIndex = tracker.totalTurns;
 
   const assistantLower = assistantText.toLowerCase();
@@ -78,8 +115,12 @@ export function updateSession(tracker: SessionTracker, userText: string, assista
   if (praised) {
     entry.stuckCount = 0;
     tracker.recentCorrect = true;
-  } else {
+  } else if (looksStuck(userText)) {
+    // Only escalate hints when the student actually signals struggle.
     entry.stuckCount += 1;
+    tracker.recentCorrect = false;
+  } else {
+    // Normal follow-up — don't escalate.
     tracker.recentCorrect = false;
   }
 }

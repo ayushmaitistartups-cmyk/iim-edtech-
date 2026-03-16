@@ -19,7 +19,12 @@ interface ChatRequestBody {
 }
 
 /** Validated topics that may arrive from the client session tracker. */
-const VALID_CONCEPTS = ["general", "integration", "differentiation", "kinematics", "organic-chemistry", "thermodynamics", "probability"];
+const VALID_CONCEPTS = [
+  "general", "integration", "differentiation", "kinematics", "organic-chemistry",
+  "thermodynamics", "probability", "algebra", "geometry", "trigonometry",
+  "electromagnetism", "optics", "waves", "modern-physics", "inorganic-chemistry",
+  "physical-chemistry", "biology",
+];
 
 const CONTEXT_WINDOW = 8;
 
@@ -155,7 +160,7 @@ export async function POST(request: Request): Promise<Response> {
     const rawConcept = typeof payload.currentConcept === "string" ? payload.currentConcept : "general";
     const currentConcept = VALID_CONCEPTS.includes(rawConcept) ? rawConcept : "general";
     systemPrompt = buildAdaptiveLiveOCRPrompt(exam, { stuckCount, currentConcept });
-    maxTokens = 384;
+    maxTokens = 512;
   } else if (mode === "live_ocr") {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
     maxTokens = 512;
@@ -173,7 +178,7 @@ export async function POST(request: Request): Promise<Response> {
     const deadline = setTimeout(() => {
       timedOut = true;
       controller.enqueue(
-        encoder.encode(`data: ${JSON.stringify("Response generation timed out. Please try again.")}\n\n`)
+        encoder.encode(`data: [ERROR] Response generation timed out. Please try again.\n\n`)
       );
     }, MAX_STREAM_DURATION_MS);
 
@@ -186,7 +191,7 @@ export async function POST(request: Request): Promise<Response> {
 
       if (!hasTokens && !timedOut) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify("I couldn't generate a response. Please try again.")}\n\n`)
+          encoder.encode(`data: [ERROR] I couldn't generate a response. Please try again.\n\n`)
         );
       }
     } catch (error) {
