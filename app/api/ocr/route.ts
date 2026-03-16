@@ -1,6 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { ConfigurationError, extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
+import { uploadScanImage, saveScanLog } from "@/lib/supabase";
 
 interface OCRRequestBody {
   image?: unknown;
@@ -37,7 +38,26 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const text = await extractTextFromFrame(payload.image);
-    return Response.json({ text: text.trim() });
+    const trimmedText = text.trim();
+
+    // Fire-and-forget: save scan image + log to Supabase for admin review
+    void (async () => {
+      try {
+        const imagePath = await uploadScanImage(payload.image as string, userId);
+        if (imagePath) {
+          await saveScanLog({
+            userId,
+            imagePath,
+            ocrText: trimmedText,
+            charCount: trimmedText.length,
+          });
+        }
+      } catch (e) {
+        console.warn("[ScanLog] Background save failed:", e);
+      }
+    })();
+
+    return Response.json({ text: trimmedText });
   } catch (error) {
     if (error instanceof ConfigurationError) {
       return Response.json(
