@@ -16,7 +16,20 @@ export interface SessionTracker {
   recentCorrect: boolean;
 }
 
-const PRAISE_WORDS = ["correct", "exactly", "great", "well done", "right", "good", "perfect", "yes", "nicely", "spot on", "that's it"];
+const PRAISE_PHRASES = [
+  "well done",
+  "that's correct",
+  "that is correct",
+  "exactly right",
+  "you got it",
+  "spot on",
+  "that's it",
+  "great job",
+  "nicely done",
+  "perfect answer",
+  "you're right",
+  "absolutely correct",
+];
 
 /** Number of turns of inactivity before a topic's stuckCount resets to zero. */
 const DECAY_AFTER_TURNS = 5;
@@ -34,7 +47,7 @@ export function createSessionTracker(): SessionTracker {
 export function updateSession(tracker: SessionTracker, userText: string, assistantText: string): void {
   tracker.totalTurns += 1;
 
-  const topic = inferTopic(userText);
+  const topic = inferTopic(userText, tracker.currentConcept);
   tracker.currentConcept = topic;
 
   if (!tracker.topicsAttempted.includes(topic)) {
@@ -60,7 +73,7 @@ export function updateSession(tracker: SessionTracker, userText: string, assista
   entry.lastTurnIndex = tracker.totalTurns;
 
   const assistantLower = assistantText.toLowerCase();
-  const praised = PRAISE_WORDS.some((word) => assistantLower.includes(word));
+  const praised = PRAISE_PHRASES.some((phrase) => assistantLower.includes(phrase));
 
   if (praised) {
     entry.stuckCount = 0;

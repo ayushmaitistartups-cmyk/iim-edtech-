@@ -18,7 +18,6 @@ interface ScanMemoryEntry {
 }
 
 interface UseLiveOCRAgentResult {
-  alwaysOnVoice: boolean;
   autoScanEnabled: boolean;
   error: string | null;
   initialized: boolean;
@@ -37,7 +36,6 @@ interface UseLiveOCRAgentResult {
   stopListening: () => void;
   streamingText: string;
   submitText: (text: string) => Promise<void>;
-  toggleAlwaysOnVoice: () => void;
   toggleAutoScan: () => void;
   transcript: string;
 }
@@ -50,7 +48,6 @@ const MAX_SCAN_MEMORY_PAGES = 4;
 const SAME_PAGE_SIMILARITY_THRESHOLD = 0.985;
 const AUTO_SCAN_INTERVAL_MS = 8000;
 const AUTO_SCAN_MIN_TEXT_LENGTH = 20;
-const ALWAYS_ON_RESTART_DELAY_MS = 600;
 
 const DEEP_SCAN_PREFIX = String.raw`(?:can you\s+|could you\s+|would you\s+|please\s+)?(?:scan|read|analy[sz]e|look at)\s+(?:this|the)\s+(?:page|sheet|notebook|problem|question)`;
 const DEEP_SCAN_EXACT_PATTERN = new RegExp(`^${DEEP_SCAN_PREFIX}(?:\s+for me)?(?:\s+please)?[.!?]*$`, "i");
@@ -214,7 +211,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const [lastScanAt, setLastScanAt] = useState<number | null>(null);
   const [quotaExhausted, setQuotaExhausted] = useState<boolean>(false);
   const [scanSummary, setScanSummary] = useState<string | null>(null);
-  const [alwaysOnVoice, setAlwaysOnVoice] = useState(false);
   const [autoScanEnabled, setAutoScanEnabled] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -225,8 +221,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const pageContextRef = useRef<string>("");
   const statusRef = useRef<AgentStatus>("idle");
   const turnInProgressRef = useRef<boolean>(false);
-  const alwaysOnRef = useRef(false);
-  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoScanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoScanningRef = useRef(false);
   // Shadow volatile state in refs so runAutoScan stays a stable callback.
@@ -260,10 +254,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   }, [status]);
 
   useEffect(() => {
-    alwaysOnRef.current = alwaysOnVoice;
-  }, [alwaysOnVoice]);
-
-  useEffect(() => {
     isScanningRef.current = isScanning;
   }, [isScanning]);
 
@@ -294,28 +284,10 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     }
   }, [voiceOutputEnabled, stopSpeaking]);
 
-  // Always-on voice: restart listening after each reply cycle.
-  useEffect(() => {
-    if (status === "idle" && alwaysOnRef.current && !isListening) {
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      restartTimerRef.current = setTimeout(() => {
-        if (statusRef.current === "idle" && alwaysOnRef.current) {
-          startListening();
-        }
-      }, ALWAYS_ON_RESTART_DELAY_MS);
-    }
-
-    return () => {
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-    };
-  }, [status, isListening, startListening]);
-
-  // Cleanup timers and flags on unmount.
+  // Cleanup auto-scan interval on unmount.
   useEffect(() => {
     return () => {
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       if (autoScanIntervalRef.current) clearInterval(autoScanIntervalRef.current);
-      alwaysOnRef.current = false;
     };
   }, []);
 
@@ -677,28 +649,12 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     setStatus("idle");
   }, [baseInterrupt]);
 
-  const toggleAlwaysOnVoice = useCallback(() => {
-    setAlwaysOnVoice((prev) => {
-      const next = !prev;
-      if (!next) {
-        stopListening();
-        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
-      } else {
-        if (statusRef.current === "idle") {
-          setTimeout(() => startListening(), 200);
-        }
-      }
-      return next;
-    });
-  }, [stopListening, startListening]);
-
   const toggleAutoScan = useCallback(() => {
     setAutoScanEnabled((prev) => !prev);
   }, []);
 
   return useMemo(
     () => ({
-      alwaysOnVoice,
       autoScanEnabled,
       error,
       initialized,
@@ -717,12 +673,10 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       stopListening,
       streamingText,
       submitText,
-      toggleAlwaysOnVoice,
       toggleAutoScan,
       transcript,
     }),
     [
-      alwaysOnVoice,
       autoScanEnabled,
       error,
       initialized,
@@ -741,7 +695,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       stopListening,
       streamingText,
       submitText,
-      toggleAlwaysOnVoice,
       toggleAutoScan,
       transcript
     ]

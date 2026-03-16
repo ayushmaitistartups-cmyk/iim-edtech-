@@ -60,7 +60,6 @@ export default function LiveOCRPage(): JSX.Element {
 
   const { isActive, permissionError, noCameraAvailable, startCamera, stopCamera } = useCamera();
   const {
-    alwaysOnVoice,
     autoScanEnabled,
     error,
     initialized,
@@ -79,7 +78,6 @@ export default function LiveOCRPage(): JSX.Element {
     stopListening,
     streamingText,
     submitText,
-    toggleAlwaysOnVoice,
     toggleAutoScan,
     transcript
   } = useLiveOCRAgent(exam, videoRef, voiceOutputEnabled);
@@ -105,11 +103,8 @@ export default function LiveOCRPage(): JSX.Element {
   }, []);
 
   const handleWakeWordToggle = useCallback(() => {
-    setWakeWordEnabled((prev) => {
-      if (!prev && alwaysOnVoice) toggleAlwaysOnVoice();
-      return !prev;
-    });
-  }, [alwaysOnVoice, toggleAlwaysOnVoice]);
+    setWakeWordEnabled((prev) => !prev);
+  }, []);
 
   const { isListeningForWake, isSupported: wakeSupported } = useWakeWord({
     enabled: wakeWordShouldRun,
@@ -431,9 +426,7 @@ export default function LiveOCRPage(): JSX.Element {
                       ? "border-green-500 bg-green-50 text-green-600"
                       : status === "thinking" || status === "speaking"
                         ? "border-red-400 bg-red-50 text-red-600"
-                        : alwaysOnVoice
-                          ? "border-sky-500 bg-sky-50 text-sky-600 ring-2 ring-sky-300"
-                          : "border-border bg-background text-foreground hover:border-foreground",
+                        : "border-border bg-background text-foreground hover:border-foreground",
                     !microphoneAvailable ? "cursor-not-allowed opacity-50" : ""
                   ].join(" ")}
                   disabled={!microphoneAvailable}
@@ -456,24 +449,6 @@ export default function LiveOCRPage(): JSX.Element {
                   ) : (
                     <Mic className="h-5 w-5" />
                   )}
-                </button>
-
-                <button
-                  className={[
-                    "flex h-12 items-center gap-2 border px-3 text-xs font-medium transition-colors",
-                    alwaysOnVoice
-                      ? "border-sky-500 bg-sky-50 text-sky-700 hover:border-sky-700"
-                      : "border-border text-foreground/60 hover:border-foreground"
-                  ].join(" ")}
-                  disabled={!microphoneAvailable}
-                  onClick={() => {
-                    if (wakeWordEnabled) setWakeWordEnabled(false);
-                    toggleAlwaysOnVoice();
-                  }}
-                  title={alwaysOnVoice ? "Always-on listening active — click to disable" : "Enable always-on listening"}
-                  type="button"
-                >
-                  {alwaysOnVoice ? "Always on ●" : "Always on"}
                 </button>
 
                 {wakeSupported ? (
