@@ -26,7 +26,7 @@ export function ChatBubble({ message }: ChatBubbleProps): JSX.Element {
         ) : (
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            rehypePlugins={[[rehypeKatex, { strict: false }]]}
           >
             {message.content}
           </ReactMarkdown>

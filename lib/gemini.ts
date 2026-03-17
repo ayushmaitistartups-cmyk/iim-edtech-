@@ -427,8 +427,9 @@ export async function* streamChat(
             if (text) {
               yield text;
             }
-          } catch {
-            continue;
+          } catch (e: any) {
+            yield `\n\n[Response stopped: ${e?.message ?? "content filtered"}]`;
+            break;
           }
         }
         return; // Success — exit both loops.

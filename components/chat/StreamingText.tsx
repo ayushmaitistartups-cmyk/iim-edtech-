@@ -17,7 +17,7 @@ export function StreamingText({ text }: StreamingTextProps): JSX.Element {
       <div className="max-w-[85%] border border-border bg-background px-4 py-3 text-sm leading-relaxed overflow-x-auto prose prose-sm dark:prose-invert">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
+          rehypePlugins={[[rehypeKatex, { strict: false }]]}
         >
           {text}
         </ReactMarkdown>
