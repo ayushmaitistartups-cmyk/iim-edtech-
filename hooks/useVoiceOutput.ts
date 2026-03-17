@@ -249,14 +249,55 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     };
   }, []);
 
+  // iOS: recover from background/tab-switch freeze.  When the page comes back
+  // to the foreground, speechSynthesis may be permanently frozen.  Cancel and
+  // restart the queue so the user doesn't think voice is broken.
+  useEffect(() => {
+    if (!supported || !isIOSRef.current) return;
+
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && activeRef.current) {
+        window.speechSynthesis.cancel();
+        setTimeout(() => {
+          if (queueRef.current.length > 0) {
+            speakNext();
+          } else {
+            activeRef.current = false;
+            setIsSpeaking(false);
+            clearResumeInterval();
+          }
+        }, 300);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [supported, speakNext, clearResumeInterval]);
+
   const unlockAudio = useCallback(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     if (audioUnlockedRef.current) return;
     audioUnlockedRef.current = true;
-    // iOS requires a speak() call inside a user gesture to permit future synthesis
-    const silent = new SpeechSynthesisUtterance(" ");
-    silent.volume = 0.01; // Must be > 0: some iOS versions won't unlock at volume=0
-    silent.rate = 10;
+
+    // Clear any stale synthesis state first
+    window.speechSynthesis.cancel();
+
+    // iOS requires a speak() call inside a user gesture to permit future synthesis.
+    // rate must be ≤ 4 (iOS silently drops utterances with rate > ~4).
+    // volume must be > 0 (some iOS versions won't unlock at 0).
+    const silent = new SpeechSynthesisUtterance("");
+    silent.volume = 0.01;
+    silent.rate = 2;
+
+    // Set voice explicitly so iOS doesn't fail on a missing default voice.
+    const voice = pickVoice();
+    if (voice) {
+      silent.voice = voice;
+      silent.lang = voice.lang;
+    } else {
+      silent.lang = "en-US";
+    }
+
     window.speechSynthesis.speak(silent);
   }, []);
 

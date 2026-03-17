@@ -26,7 +26,7 @@ const VALID_CONCEPTS = [
   "physical-chemistry", "biology",
 ];
 
-const CONTEXT_WINDOW = 8;
+const CONTEXT_WINDOW = 16;
 
 function resolveMode(mode: unknown): AppMode | null {
   if (mode === "live_ocr" || mode === "live_ocr_agent" || mode === "send_image" || mode === "voice_agent") {

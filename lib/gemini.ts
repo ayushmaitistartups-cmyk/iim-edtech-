@@ -18,7 +18,7 @@ function stripDataUrlPrefix(input: string): string {
 }
 
 /** Max number of recent messages retained, plus the first context seed message. */
-const MAX_CONTEXT_MESSAGES = 8;
+const MAX_CONTEXT_MESSAGES = 16;
 
 /** Timeout for non-streaming OCR requests (ms). */
 const GEMINI_OCR_TIMEOUT_MS = 25_000;

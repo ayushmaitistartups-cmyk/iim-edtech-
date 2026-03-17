@@ -44,7 +44,13 @@ const STRUGGLE_SIGNALS = [
   "confused",
   "help me",
   "what do i do",
+  "what should i do",
+  "what to do",
+  "what next",
+  "what do i do next",
   "how do i",
+  "how should i",
+  "how to solve",
   "i'm lost",
   "im lost",
   "wrong",
@@ -55,12 +61,22 @@ const STRUGGLE_SIGNALS = [
   "i dont know",
   "still stuck",
   "hint",
+  "tell me",
+  "please help",
+  "please tell",
+  "next step",
+  "solve",
+  "complete your",
+  "you stopped",
+  "stopped in between",
+  "cut off",
+  "can you please",
 ];
 
 function looksStuck(userText: string): boolean {
   const lower = userText.toLowerCase();
-  // Short follow-ups (< 6 words) are likely confused responses
-  if (lower.split(/\s+/).length < 6) return true;
+  // Short follow-ups (< 8 words) are likely confused/frustrated responses
+  if (lower.split(/\s+/).length < 8) return true;
   return STRUGGLE_SIGNALS.some((signal) => lower.includes(signal));
 }
 

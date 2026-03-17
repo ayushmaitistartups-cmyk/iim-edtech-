@@ -1,7 +1,7 @@
 export type SSEDataHandler = (value: string) => void;
 
 /** Maximum time to wait for the next SSE chunk from the server (ms). */
-const SSE_READ_TIMEOUT_MS = 20_000;
+const SSE_READ_TIMEOUT_MS = 30_000;
 
 export async function consumeSSE(
   response: Response,
@@ -22,20 +22,28 @@ export async function consumeSSE(
         throw new DOMException("Aborted", "AbortError");
       }
 
+      // Each iteration creates a timeout — `.finally()` ensures the timer is
+      // always cleaned up, preventing leaked timers that caused unhandled
+      // promise rejections on iOS Safari and could kill the stream.
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+
       const { done, value } = await Promise.race([
         reader.read(),
         new Promise<never>((_, reject) => {
-          const timer = setTimeout(
+          timerId = setTimeout(
             () => reject(new Error("Server response timed out. Please try again.")),
             SSE_READ_TIMEOUT_MS
           );
           const onAbort = () => {
-            clearTimeout(timer);
+            clearTimeout(timerId);
             reject(new DOMException("Aborted", "AbortError"));
           };
           signal?.addEventListener("abort", onAbort, { once: true });
         }),
-      ]);
+      ]).finally(() => {
+        if (timerId !== undefined) clearTimeout(timerId);
+      });
+
       if (done) {
         break;
       }

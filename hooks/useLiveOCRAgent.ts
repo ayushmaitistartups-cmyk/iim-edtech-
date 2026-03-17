@@ -348,6 +348,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       const stuckCount = session.conceptMap[session.currentConcept]?.stuckCount ?? 0;
 
       const signal = createAbortSignal();
+      let fullText = "";
 
       try {
         const response = await fetch("/api/chat", {
@@ -378,7 +379,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           return;
         }
 
-        let fullText = "";
         let spokenUntil = 0;
 
         await consumeSSE(response, (data) => {
@@ -402,20 +402,6 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
             setStatus("speaking");
           }
         }
-
-        if (fullText.trim()) {
-          const assistantMessage = buildMessage("assistant", fullText.trim());
-          messagesRef.current = [...messagesRef.current, assistantMessage];
-          setMessages(messagesRef.current);
-          updateSession(sessionRef.current, trimmed, fullText.trim());
-        }
-
-        setStreamingText("");
-        // If voice is off (or response had no speakable content), nothing transitions
-        // status from "thinking" → "idle" via the isSpeaking effect, so do it here.
-        if (statusRef.current === "thinking") {
-          setStatus("idle");
-        }
       } catch (cause) {
         if (cause instanceof DOMException && cause.name === "AbortError") {
           setStreamingText("");
@@ -423,12 +409,29 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           return;
         }
 
-        const nextError = cause instanceof Error ? cause.message : String(cause);
-        setError(nextError);
-        setStreamingText("");
-        setStatus("idle");
+        // Only show error toast when no partial text was received — if we got
+        // some text, save it as a message below instead of losing it.
+        if (!fullText.trim()) {
+          const nextError = cause instanceof Error ? cause.message : String(cause);
+          setError(nextError);
+        }
       } finally {
         turnInProgressRef.current = false;
+      }
+
+      // Always save whatever text was received (complete OR partial from a
+      // stream timeout/error). This prevents the frustrating "response vanishes"
+      // behaviour that occurred on iOS when the SSE stream dropped mid-response.
+      setStreamingText("");
+      if (fullText.trim()) {
+        const assistantMessage = buildMessage("assistant", fullText.trim());
+        messagesRef.current = [...messagesRef.current, assistantMessage];
+        setMessages(messagesRef.current);
+        updateSession(sessionRef.current, trimmed, fullText.trim());
+      }
+
+      if (statusRef.current === "thinking") {
+        setStatus("idle");
       }
     },
     [baseInterrupt, captureFrame, createAbortSignal, exam, speak, speakProgressively, voiceOutputEnabled]
