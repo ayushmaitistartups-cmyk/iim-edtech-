@@ -426,18 +426,83 @@ export async function* streamChat(
           ]);
         const result = await withRetry(callFn);
 
+        let insideThink = false;
+        let buffer = "";
+
         for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
           if (abortSignal?.aborted) return;
           try {
             const text = chunk.text();
-            if (text) {
-              yield text;
+            if (!text) continue;
+            
+            buffer += text;
+            
+            while (buffer.length > 0) {
+              if (!insideThink) {
+                const thinkStart = buffer.indexOf("<think>");
+                if (thinkStart !== -1) {
+                  if (thinkStart > 0) {
+                    yield buffer.slice(0, thinkStart);
+                  }
+                  insideThink = true;
+                  buffer = buffer.slice(thinkStart + 7);
+                } else {
+                  let possiblePartialStart = -1;
+                  for (let i = Math.max(0, buffer.length - 6); i < buffer.length; i++) {
+                    if ("<think>".startsWith(buffer.slice(i))) {
+                      possiblePartialStart = i;
+                      break;
+                    }
+                  }
+
+                  if (possiblePartialStart !== -1) {
+                    if (possiblePartialStart > 0) {
+                      yield buffer.slice(0, possiblePartialStart);
+                    }
+                    buffer = buffer.slice(possiblePartialStart);
+                    break;
+                  } else {
+                    yield buffer;
+                    buffer = "";
+                  }
+                }
+              } else {
+                const thinkEnd = buffer.indexOf("</think>");
+                if (thinkEnd !== -1) {
+                  insideThink = false;
+                  buffer = buffer.slice(thinkEnd + 8);
+                } else {
+                  let possiblePartialEnd = -1;
+                  for (let i = Math.max(0, buffer.length - 7); i < buffer.length; i++) {
+                    if ("</think>".startsWith(buffer.slice(i))) {
+                      possiblePartialEnd = i;
+                      break;
+                    }
+                  }
+
+                  if (possiblePartialEnd !== -1) {
+                     buffer = buffer.slice(possiblePartialEnd);
+                  } else {
+                     buffer = "";
+                  }
+                  break;
+                }
+              }
             }
           } catch (e: any) {
+            if (buffer.length > 0 && !insideThink) {
+              yield buffer;
+            }
+            buffer = "";
             yield `\n\n[Response stopped: ${e?.message ?? "content filtered"}]`;
             break;
           }
         }
+        
+        if (buffer.length > 0 && !insideThink) {
+          yield buffer;
+        }
+        
         return; // Success — exit both loops.
       } catch (error) {
         if (isQuotaError(error)) {
