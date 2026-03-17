@@ -214,7 +214,11 @@ export async function POST(request: Request): Promise<Response> {
         return;
       }
 
-      throw error;
+      // Any other error (e.g. chunk timeout): send [ERROR] so the client
+      // discards partial text instead of saving it as a complete message.
+      controller.enqueue(
+        encoder.encode(`data: [ERROR] Something went wrong. Please try again.\n\n`)
+      );
     } finally {
       clearTimeout(deadline);
     }

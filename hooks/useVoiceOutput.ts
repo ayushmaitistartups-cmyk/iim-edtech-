@@ -156,7 +156,9 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     }
 
     const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = "en-IN";
+    // Use the selected voice's actual language — hardcoding en-IN while
+    // the selected voice is en-US causes iOS to silently drop the utterance.
+    utterance.lang = voiceRef.current?.lang ?? "en-IN";
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
 
@@ -253,7 +255,7 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     audioUnlockedRef.current = true;
     // iOS requires a speak() call inside a user gesture to permit future synthesis
     const silent = new SpeechSynthesisUtterance(" ");
-    silent.volume = 0;
+    silent.volume = 0.01; // Must be > 0: some iOS versions won't unlock at volume=0
     silent.rate = 10;
     window.speechSynthesis.speak(silent);
   }, []);

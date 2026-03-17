@@ -24,7 +24,7 @@ const MAX_CONTEXT_MESSAGES = 8;
 const GEMINI_OCR_TIMEOUT_MS = 25_000;
 
 /** Maximum time to wait for any single chunk during streaming (ms). */
-const GEMINI_CHUNK_TIMEOUT_MS = 15_000;
+const GEMINI_CHUNK_TIMEOUT_MS = 30_000;
 
 /** Models to try in order — if one hits quota, fall back to the next. */
 const MODEL_PRIORITY = [
@@ -240,12 +240,18 @@ async function* iterateWithChunkTimeout<T>(
 ): AsyncGenerator<T> {
   const iterator = stream[Symbol.asyncIterator]();
   while (true) {
+    let timerId: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
       iterator.next(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Gemini stream chunk timed out")), timeoutMs)
-      ),
-    ]);
+      new Promise<never>((_, reject) => {
+        timerId = setTimeout(
+          () => reject(new Error("Gemini stream chunk timed out")),
+          timeoutMs
+        );
+      }),
+    ]).finally(() => {
+      if (timerId !== undefined) clearTimeout(timerId);
+    });
     if (result.done) break;
     yield result.value;
   }

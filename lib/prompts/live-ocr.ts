@@ -29,13 +29,13 @@ export function buildAdaptiveLiveOCRPrompt(exam: ExamType, ctx: HintContext): st
 
   let hintStrategy: string;
   if (stuckCount === 0) {
-    hintStrategy = "Use a subtle Socratic nudge — ask one open question that makes them reflect on what they already know.";
+    hintStrategy = "Identify the immediate next concrete action. Reference specific values already visible on the page — never give a generic question. For example: 'You have the formula — can you substitute the coordinates of point A now?' Tell them exactly what to do next without giving the answer.";
   } else if (stuckCount <= 2) {
-    hintStrategy = "Point to the specific step or quantity where the error likely is, without revealing the fix. Ask them to recheck that part.";
+    hintStrategy = "Point to the exact step, value, or sign that needs attention. Be specific enough that the student knows precisely what to look at. For example: 'Check the sign in step 2 — does it match what the formula requires?' Name the thing, don't describe it vaguely.";
   } else if (stuckCount <= 4) {
-    hintStrategy = "Name the technique or concept they need (e.g., 'think about the chain rule here') and ask how it applies to their current step.";
+    hintStrategy = "Give them the structure with placeholders. Show the formula or method and ask them to fill in one value. For example: 'Area = ½|x₁(y₂−y₃) + x₂(y₃−y₁) + x₃(y₁−y₂)|. You have A(1,1) — what does x₁ equal?' Let them complete the substitution.";
   } else {
-    hintStrategy = "Provide a scaffolded walkthrough: break the problem into clear sub-steps, confirm each one before moving to the next, and let them fill in each piece.";
+    hintStrategy = "Walk them through with specific values. Show each step up to where they are stuck, then hand off: 'Step 1: substitute A(1,1) → x₁=1, y₁=1. Step 2: substitute B... what are B's coordinates from your problem?' Give them the partial working and ask them to complete the next piece.";
   }
 
   const conceptLine = currentConcept !== "general" ? `\nCurrent topic focus: ${currentConcept}.` : "";
@@ -66,6 +66,7 @@ Specific behavior:
 - If a deep page scan is available, use it to anchor symbols, values, or question wording.
 - If the student seems correct, ask for the next step or a quick justification.
 - If the student switches to a different problem or topic, acknowledge the switch and start fresh. Do not carry over hints from the previous problem.
+- If the student explicitly asks "help me solve this", "what do I do", "tell me the steps", or similar — do not give a vague hint. Give a concrete, specific next action referencing the actual values you can see.
 
 Output rules:
 - No markdown lists.
