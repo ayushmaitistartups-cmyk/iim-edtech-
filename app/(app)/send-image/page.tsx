@@ -91,6 +91,9 @@ export default function SendImagePage(): JSX.Element {
     setAnalysisDone(false);
     clearHistory();
 
+    let fullText = "";
+    let streamCompleted = false;
+
     try {
       const compressedFile = await compressForGemini(file);
       const formData = new FormData();
@@ -107,7 +110,6 @@ export default function SendImagePage(): JSX.Element {
         throw new Error(`API Error: ${response.status} ${errText}`);
       }
 
-      let fullText = "";
       await consumeSSE(response, (data) => {
         if (data === "[DONE]") {
           return;
@@ -120,14 +122,23 @@ export default function SendImagePage(): JSX.Element {
         setAnalysisStreamingText(fullText);
       });
 
+      streamCompleted = true;
       addAssistantMessage(fullText);
-      setAnalysisStreamingText("");
       setAnalysisDone(true);
     } catch (e: unknown) {
-      setAnalysisStreamingText("");
       const msg = e instanceof Error ? e.message : String(e);
       setError(`Analysis failed: ${msg}`);
     } finally {
+      // Save partial text if stream was interrupted mid-response.
+      if (fullText.trim() && !streamCompleted) {
+        let finalText = fullText.trim();
+        if (!/[.!?]$/.test(finalText)) {
+          finalText += "...";
+        }
+        addAssistantMessage(finalText);
+        setAnalysisDone(true);
+      }
+      setAnalysisStreamingText("");
       setIsAnalyzing(false);
     }
   };

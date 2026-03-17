@@ -67,14 +67,29 @@ export async function POST(request: Request): Promise<Response> {
     }
   ];
 
+  const MAX_STREAM_DURATION_MS = 55_000;
+
   console.log("Starting streamChat!");
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
+    const abortController = new AbortController();
+    let timedOut = false;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+      controller.enqueue(
+        encoder.encode(`data: [ERROR] Response generation timed out. Please try again.\n\n`)
+      );
+    }, MAX_STREAM_DURATION_MS);
+
     try {
-      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image)) {
+      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image, 1024, abortController.signal)) {
+        if (timedOut) break;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
       }
     } catch (error) {
+      if (timedOut) return;
+
       if (error instanceof QuotaExhaustedError) {
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify("API quota exhausted. Please try again in a moment.")}\n\n`)
@@ -94,7 +109,11 @@ export async function POST(request: Request): Promise<Response> {
         return;
       }
 
-      throw error;
+      controller.enqueue(
+        encoder.encode(`data: [ERROR] Something went wrong. Please try again.\n\n`)
+      );
+    } finally {
+      clearTimeout(deadline);
     }
   });
 }

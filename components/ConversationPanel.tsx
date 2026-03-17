@@ -113,6 +113,9 @@ export function ConversationPanel({
       const messagesForApi = trimMessagesForCost(updatedMessages);
       setStatus("thinking");
 
+      let fullText = "";
+      let streamCompleted = false;
+
       try {
         const signal = createAbortSignal();
         const response = await fetch("/api/chat", {
@@ -132,7 +135,6 @@ export function ConversationPanel({
           throw new Error(`API Error: ${response.status} ${errText}`);
         }
 
-        let fullText = "";
         let lastSpokenIndex = 0;
 
         await consumeSSE(response, (data) => {
@@ -162,6 +164,8 @@ export function ConversationPanel({
           }
         }, signal);
 
+        streamCompleted = true;
+
         // Speak any remaining text
         const remaining = fullText.slice(lastSpokenIndex).trim();
         if (remaining) {
@@ -174,18 +178,27 @@ export function ConversationPanel({
         if (fullText.trim()) {
           onAddAssistantMessage(fullText.trim());
         }
-        setStreamingText("");
       } catch (e: unknown) {
         if (e instanceof DOMException && e.name === "AbortError") {
-          // User interrupted — not an error
           setStreamingText("");
           setStatus("idle");
           return;
         }
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
+      } finally {
+        // Save partial text if stream was interrupted mid-response.
+        if (fullText.trim() && !streamCompleted) {
+          let finalText = fullText.trim();
+          if (!/[.!?]$/.test(finalText)) {
+            finalText += "...";
+          }
+          onAddAssistantMessage(finalText);
+        }
         setStreamingText("");
-        setStatus("idle");
+        if (statusRef.current === "thinking" || statusRef.current === "speaking") {
+          setStatus("idle");
+        }
       }
     },
     [status, onAddUserMessage, createAbortSignal, mode, ocrText, image, interrupt, speak, onAddAssistantMessage]

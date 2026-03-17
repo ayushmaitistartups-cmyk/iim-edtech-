@@ -32,7 +32,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   try {
-    const text = await extractTextFromFrame(payload.image);
+    const text = await extractTextFromFrame(payload.image, AbortSignal.timeout(25_000));
     const trimmedText = text.trim();
 
     // Fire-and-forget: save scan image + log to Supabase for admin review

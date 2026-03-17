@@ -23,8 +23,9 @@ const MAX_CONTEXT_MESSAGES = 16;
 /** Timeout for non-streaming OCR requests (ms). */
 const GEMINI_OCR_TIMEOUT_MS = 25_000;
 
-/** Maximum time to wait for any single chunk during streaming (ms). */
-const GEMINI_CHUNK_TIMEOUT_MS = 30_000;
+/** Maximum time to wait for any single chunk during streaming (ms).
+ *  Must be well below SSE_READ_TIMEOUT_MS (25s) to avoid client/server races. */
+const GEMINI_CHUNK_TIMEOUT_MS = 15_000;
 
 /** Models to try in order — best quality first, lite as fallback. */
 const MODEL_PRIORITY = [
@@ -245,7 +246,7 @@ function trimHistory(messages: Message[], maxMessages: number): Message[] {
 /*  OCR                                                                       */
 /* -------------------------------------------------------------------------- */
 
-export async function extractTextFromFrame(base64: string): Promise<string> {
+export async function extractTextFromFrame(base64: string, abortSignal?: AbortSignal): Promise<string> {
   const cleanBase64 = stripDataUrlPrefix(base64);
   const content = [
     {
@@ -269,7 +270,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         console.log(`[Gemini] OCR Request | Model: ${modelName} | Key: ${keyTag(keyIdx)}`);
         const model = getModel(keyIdx, modelName, undefined, 512);
 
-        const callFn = () => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS });
+        const callFn = () => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS, signal: abortSignal });
         const result = await withRetry(callFn);
 
         return result.response.text().trim();
@@ -341,7 +342,8 @@ export async function* streamChat(
   messages: Message[],
   systemPrompt: string,
   image?: ImageInput,
-  maxOutputTokens = 1024
+  maxOutputTokens = 1024,
+  abortSignal?: AbortSignal
 ): AsyncGenerator<string> {
   if (messages.length === 0) {
     return;
@@ -380,10 +382,11 @@ export async function* streamChat(
         const model = getModel(keyIdx, modelName, systemPrompt, maxOutputTokens);
         const chat = model.startChat({ history: historyParts });
 
-        const callFn = () => chat.sendMessageStream(parts);
+        const callFn = () => chat.sendMessageStream(parts, { signal: abortSignal });
         const result = await withRetry(callFn);
 
         for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
+          if (abortSignal?.aborted) return;
           try {
             const text = chunk.text();
             if (text) {

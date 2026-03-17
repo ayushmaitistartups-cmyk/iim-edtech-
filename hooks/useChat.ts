@@ -64,6 +64,9 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
     const nextMessages = [...messagesRef.current, buildMessage("user", trimmed)];
     setMessages(nextMessages);
 
+    let fullText = "";
+    let streamCompleted = false;
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -82,7 +85,6 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         throw new Error(`API Error: ${response.status} ${errText}`);
       }
 
-      let fullText = "";
       await consumeSSE(response, (data) => {
         if (data === "[DONE]") {
           return;
@@ -101,15 +103,24 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         }
       });
 
+      streamCompleted = true;
+
       if (fullText.trim()) {
         setMessages((current) => [...current, buildMessage("assistant", fullText.trim())]);
       }
-      setStreamingText("");
     } catch (e: any) {
       const msg = e.message || String(e);
       setError(msg.startsWith("API Error") ? msg : `Something went wrong: ${msg}`);
-      setStreamingText("");
     } finally {
+      // Save partial text if stream was interrupted mid-response.
+      if (fullText.trim() && !streamCompleted) {
+        let finalText = fullText.trim();
+        if (!/[.!?]$/.test(finalText)) {
+          finalText += "...";
+        }
+        setMessages((current) => [...current, buildMessage("assistant", finalText)]);
+      }
+      setStreamingText("");
       setIsLoading(false);
     }
   };
