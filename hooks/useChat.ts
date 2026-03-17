@@ -115,12 +115,14 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
       // Save partial or placeholder text to maintain user/assistant alternation.
       if (!streamCompleted) {
         let finalText = fullText.trim();
-        if (!finalText) {
+        if (!finalText && !error) {
           finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
         } else if (!/[.!?]$/.test(finalText)) {
           finalText += "...";
         }
-        setMessages((current) => [...current, buildMessage("assistant", finalText)]);
+        if (finalText) {
+          setMessages((current) => [...current, buildMessage("assistant", finalText)]);
+        }
       }
       setStreamingText("");
       setIsLoading(false);

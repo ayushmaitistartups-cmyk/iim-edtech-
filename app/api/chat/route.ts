@@ -169,6 +169,10 @@ export async function POST(request: Request): Promise<Response> {
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
     const abortController = new AbortController();
+    
+    // Abort server-side stream if client disconnects
+    request.signal.addEventListener('abort', () => abortController.abort());
+    
     let hasTokens = false;
     let timedOut = false;
     const deadline = setTimeout(() => {

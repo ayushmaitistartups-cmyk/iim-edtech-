@@ -23,9 +23,12 @@ const MAX_CONTEXT_MESSAGES = 16;
 /** Timeout for non-streaming OCR requests (ms). */
 const GEMINI_OCR_TIMEOUT_MS = 25_000;
 
+/** Timeout for the initial stream connection (ms). */
+const GEMINI_INITIAL_CONNECTION_TIMEOUT_MS = 20_000;
+
 /** Maximum time to wait for any single chunk during streaming (ms).
  *  Must be well below SSE_READ_TIMEOUT_MS (25s) to avoid client/server races. */
-const GEMINI_CHUNK_TIMEOUT_MS = 15_000;
+const GEMINI_CHUNK_TIMEOUT_MS = 30_000;
 
 /** Models to try in order — best quality first, lite as fallback. */
 const MODEL_PRIORITY = [
@@ -405,7 +408,15 @@ export async function* streamChat(
         const model = getModel(keyIdx, modelName, systemPrompt, maxOutputTokens);
         const chat = model.startChat({ history: historyParts });
 
-        const callFn = () => chat.sendMessageStream(parts, { signal: abortSignal });
+        const callFn = () => Promise.race([
+          chat.sendMessageStream(parts, { signal: abortSignal }),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Initial connection timeout")),
+              GEMINI_INITIAL_CONNECTION_TIMEOUT_MS
+            )
+          ),
+        ]);
         const result = await withRetry(callFn);
 
         for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
