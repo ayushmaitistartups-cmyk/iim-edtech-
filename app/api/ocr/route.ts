@@ -88,7 +88,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     if (msg.includes("quota")) {
       return Response.json(
-        { error: "quota_exhausted", message: "API quota exhausted. If you updated the key, please RESTART THE SERVER." },
+        { error: "quota_exhausted", message: "API quota exhausted. Please try again in a moment." },
         { status: 429 }
       );
     }

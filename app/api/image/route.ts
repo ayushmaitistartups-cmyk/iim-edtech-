@@ -77,7 +77,7 @@ export async function POST(request: Request): Promise<Response> {
     } catch (error) {
       if (error instanceof QuotaExhaustedError) {
         controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify("API quota exhausted. The free tier daily limit has been reached. Wait for the quota reset or use a different Google AI Studio project key.")}\n\n`)
+          encoder.encode(`data: ${JSON.stringify("API quota exhausted. Please try again in a moment.")}\n\n`)
         );
         return;
       }

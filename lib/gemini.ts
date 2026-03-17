@@ -26,14 +26,12 @@ const GEMINI_OCR_TIMEOUT_MS = 25_000;
 /** Maximum time to wait for any single chunk during streaming (ms). */
 const GEMINI_CHUNK_TIMEOUT_MS = 30_000;
 
-/** Models to try in order — if one hits quota, fall back to the next. */
+/** Models to try in order — best quality first, lite as fallback. */
 const MODEL_PRIORITY = [
-  "gemini-2.5-flash-lite",
   "gemini-2.5-flash",
-  "gemini-flash-lite-latest",
-  "gemini-flash-latest",
-  "gemini-2.0-flash-lite",
+  "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
 ] as const;
 
 /** How long to skip a key after it is rate-limited (ms). */
@@ -42,7 +40,7 @@ const KEY_COOLDOWN_MS = 60_000;
 /** Custom error class for quota exhaustion so callers can distinguish it. */
 export class QuotaExhaustedError extends Error {
   constructor(model: string, detail?: string) {
-    super(`Gemini API quota exhausted for ${model}. ${detail ?? "Please wait, use a new API key, and RESTART THE SERVER."}`);
+    super(`Gemini API quota exhausted for ${model}. ${detail ?? "Please try again in a moment."}`);
     this.name = "QuotaExhaustedError";
   }
 }
@@ -201,12 +199,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Retry a function with exponential backoff on 429 errors.
- *  Only retries transient per-minute limits — daily exhaustion is thrown immediately.
- *  Used only when a single key is configured (multi-key rotates instead). */
+ *  Only retries transient per-minute limits — daily exhaustion is thrown immediately. */
 async function withRetry<T>(
   fn: () => Promise<T>,
-  maxRetries = 2,
-  baseDelayMs = 2000
+  maxRetries = 3,
+  baseDelayMs = 1000
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -249,9 +246,6 @@ function trimHistory(messages: Message[], maxMessages: number): Message[] {
 /* -------------------------------------------------------------------------- */
 
 export async function extractTextFromFrame(base64: string): Promise<string> {
-  const keys = getKeys();
-  const singleKey = keys.length === 1;
-
   const cleanBase64 = stripDataUrlPrefix(base64);
   const content = [
     {
@@ -276,8 +270,7 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
         const model = getModel(keyIdx, modelName, undefined, 512);
 
         const callFn = () => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS });
-        // Single key: retry with backoff. Multi-key: just try next key.
-        const result = singleKey ? await withRetry(callFn) : await callFn();
+        const result = await withRetry(callFn);
 
         return result.response.text().trim();
       } catch (error) {
@@ -350,9 +343,6 @@ export async function* streamChat(
   image?: ImageInput,
   maxOutputTokens = 1024
 ): AsyncGenerator<string> {
-  const keys = getKeys();
-  const singleKey = keys.length === 1;
-
   if (messages.length === 0) {
     return;
   }
@@ -391,7 +381,7 @@ export async function* streamChat(
         const chat = model.startChat({ history: historyParts });
 
         const callFn = () => chat.sendMessageStream(parts);
-        const result = singleKey ? await withRetry(callFn) : await callFn();
+        const result = await withRetry(callFn);
 
         for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
           try {
