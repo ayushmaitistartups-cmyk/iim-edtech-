@@ -408,15 +408,16 @@ export async function* streamChat(
         const model = getModel(keyIdx, modelName, systemPrompt, maxOutputTokens);
         const chat = model.startChat({ history: historyParts });
 
-        const callFn = () => Promise.race([
-          chat.sendMessageStream(parts, { signal: abortSignal }),
-          new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Initial connection timeout")),
-              GEMINI_INITIAL_CONNECTION_TIMEOUT_MS
-            )
-          ),
-        ]);
+        const callFn = (): Promise<Awaited<ReturnType<typeof chat.sendMessageStream>>> =>
+          Promise.race([
+            chat.sendMessageStream(parts, { signal: abortSignal }),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () => reject(new Error("Initial connection timeout")),
+                GEMINI_INITIAL_CONNECTION_TIMEOUT_MS
+              )
+            ),
+          ]);
         const result = await withRetry(callFn);
 
         for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
