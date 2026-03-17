@@ -22,10 +22,11 @@ export async function consumeSSE(
         throw new DOMException("Aborted", "AbortError");
       }
 
-      // Each iteration creates a timeout — `.finally()` ensures the timer is
-      // always cleaned up, preventing leaked timers that caused unhandled
-      // promise rejections on iOS Safari and could kill the stream.
+      // Each iteration creates a timeout + abort listener.  `.finally()`
+      // cleans up both, preventing leaked timers (unhandled rejections on
+      // iOS Safari) and accumulated abort listeners on normal completion.
       let timerId: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
 
       const { done, value } = await Promise.race([
         reader.read(),
@@ -34,7 +35,7 @@ export async function consumeSSE(
             () => reject(new Error("Server response timed out. Please try again.")),
             SSE_READ_TIMEOUT_MS
           );
-          const onAbort = () => {
+          onAbort = () => {
             clearTimeout(timerId);
             reject(new DOMException("Aborted", "AbortError"));
           };
@@ -42,6 +43,7 @@ export async function consumeSSE(
         }),
       ]).finally(() => {
         if (timerId !== undefined) clearTimeout(timerId);
+        if (onAbort && signal) signal.removeEventListener("abort", onAbort);
       });
 
       if (done) {

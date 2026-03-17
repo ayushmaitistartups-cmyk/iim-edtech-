@@ -65,18 +65,31 @@ const STRUGGLE_SIGNALS = [
   "please help",
   "please tell",
   "next step",
-  "solve",
+  "solve this",
+  "solve it",
   "complete your",
   "you stopped",
   "stopped in between",
   "cut off",
-  "can you please",
+];
+
+/** Short affirmative phrases that indicate progress, not frustration. */
+const PROGRESS_SIGNALS = [
+  "yes", "yeah", "yep", "got it", "i got", "done", "correct",
+  "right", "ok so", "okay so", "i did", "i tried", "i used",
+  "i substituted", "i calculated", "i found",
 ];
 
 function looksStuck(userText: string): boolean {
   const lower = userText.toLowerCase();
-  // Short follow-ups (< 8 words) are likely confused/frustrated responses
-  if (lower.split(/\s+/).length < 8) return true;
+  const wordCount = lower.split(/\s+/).length;
+
+  // Short messages that sound affirmative are progress, not struggle
+  if (wordCount < 8) {
+    if (PROGRESS_SIGNALS.some((p) => lower.includes(p))) return false;
+    return true;
+  }
+
   return STRUGGLE_SIGNALS.some((signal) => lower.includes(signal));
 }
 

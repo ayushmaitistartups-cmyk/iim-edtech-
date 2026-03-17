@@ -349,6 +349,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
       const signal = createAbortSignal();
       let fullText = "";
+      let streamCompleted = false;
 
       try {
         const response = await fetch("/api/chat", {
@@ -395,6 +396,8 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
           spokenUntil = speakProgressively(fullText, spokenUntil);
         }, signal);
 
+        streamCompleted = true;
+
         const trailingText = cleanSpeechText(fullText.slice(spokenUntil));
         if (trailingText && voiceOutputEnabled) {
           speak(trailingText);
@@ -422,12 +425,17 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       // Always save whatever text was received (complete OR partial from a
       // stream timeout/error). This prevents the frustrating "response vanishes"
       // behaviour that occurred on iOS when the SSE stream dropped mid-response.
+      // Append "..." to partial responses so the user knows it was cut short.
       setStreamingText("");
       if (fullText.trim()) {
-        const assistantMessage = buildMessage("assistant", fullText.trim());
+        let finalText = fullText.trim();
+        if (!streamCompleted && !/[.!?]$/.test(finalText)) {
+          finalText += "...";
+        }
+        const assistantMessage = buildMessage("assistant", finalText);
         messagesRef.current = [...messagesRef.current, assistantMessage];
         setMessages(messagesRef.current);
-        updateSession(sessionRef.current, trimmed, fullText.trim());
+        updateSession(sessionRef.current, trimmed, finalText);
       }
 
       if (statusRef.current === "thinking") {
