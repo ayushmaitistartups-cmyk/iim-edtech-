@@ -36,6 +36,9 @@ const MODEL_PRIORITY = [
   "gemini-2.0-flash",
 ] as const;
 
+/** How long to skip a key after it is rate-limited (ms). */
+const KEY_COOLDOWN_MS = 60_000;
+
 /** Custom error class for quota exhaustion so callers can distinguish it. */
 export class QuotaExhaustedError extends Error {
   constructor(model: string, detail?: string) {
@@ -61,23 +64,79 @@ export class ConfigurationError extends Error {
   }
 }
 
-let _genAI: GoogleGenerativeAI | null = null;
+/* -------------------------------------------------------------------------- */
+/*  Multi-key pool                                                            */
+/* -------------------------------------------------------------------------- */
 
-function getGenAI(): GoogleGenerativeAI {
-  if (!_genAI) {
-    const rawKey = requiredEnv("GEMINI_API_KEY");
-    _genAI = new GoogleGenerativeAI(rawKey.trim());
+let _keys: string[] | null = null;
+let _genAIs: GoogleGenerativeAI[] | null = null;
+
+/** Parse GEMINI_API_KEY — supports comma-separated list for key rotation. */
+function getKeys(): string[] {
+  if (!_keys) {
+    const raw = requiredEnv("GEMINI_API_KEY");
+    _keys = raw.split(",").map((k) => k.trim()).filter(Boolean);
+    if (_keys.length === 0) {
+      throw new Error("No valid API keys found in GEMINI_API_KEY");
+    }
+    if (_keys.length > 1) {
+      console.log(`[Gemini] Loaded ${_keys.length} API keys for rotation`);
+    }
   }
-  return _genAI;
+  return _keys;
+}
+
+function getGenAIs(): GoogleGenerativeAI[] {
+  if (!_genAIs) {
+    _genAIs = getKeys().map((k) => new GoogleGenerativeAI(k));
+  }
+  return _genAIs;
+}
+
+/** Short suffix for logging — never logs full key. */
+function keyTag(keyIdx: number): string {
+  return `...${getKeys()[keyIdx].slice(-4)}`;
+}
+
+/* Per-key cooldown tracking */
+const keyCooldowns = new Map<number, number>();
+
+/** Round-robin counter so consecutive requests start on different keys. */
+let _rrIndex = 0;
+
+/** Return key indices ordered: non-cooled-down first (round-robin), then cooled-down as fallback. */
+function getKeyOrder(): number[] {
+  const total = getKeys().length;
+  const now = Date.now();
+  const available: number[] = [];
+  const cooledDown: number[] = [];
+
+  for (let i = 0; i < total; i++) {
+    const idx = (_rrIndex + i) % total;
+    const expiry = keyCooldowns.get(idx);
+    if (expiry && now < expiry) {
+      cooledDown.push(idx);
+    } else {
+      if (expiry) keyCooldowns.delete(idx);
+      available.push(idx);
+    }
+  }
+
+  _rrIndex = (_rrIndex + 1) % total;
+  return [...available, ...cooledDown];
+}
+
+function cooldownKey(keyIdx: number): void {
+  keyCooldowns.set(keyIdx, Date.now() + KEY_COOLDOWN_MS);
 }
 
 function getModel(
+  keyIdx: number,
   modelName: string,
   systemInstruction?: string,
   maxOutputTokens = 1024
 ): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
-  const genAI = getGenAI();
-  return genAI.getGenerativeModel({
+  return getGenAIs()[keyIdx].getGenerativeModel({
     model: modelName,
     generationConfig: {
       maxOutputTokens,
@@ -88,6 +147,10 @@ function getModel(
     })
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Error classification                                                      */
+/* -------------------------------------------------------------------------- */
 
 /** Check if an error is a 429 quota error. */
 function isQuotaError(error: unknown): boolean {
@@ -117,6 +180,11 @@ function isQuotaExhaustedError(error: unknown): boolean {
   return error.message.includes("limit: 0");
 }
 
+function isModelNotFoundError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.includes("404") || error.message.includes("not found");
+}
+
 function extractRetryAfterSeconds(error: unknown): number | undefined {
   if (!(error instanceof Error)) return undefined;
   const match = error.message.match(/retry_delay\s*{\s*seconds:\s*(\d+)/i);
@@ -133,7 +201,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Retry a function with exponential backoff on 429 errors.
- *  Only retries transient per-minute limits — daily exhaustion is thrown immediately. */
+ *  Only retries transient per-minute limits — daily exhaustion is thrown immediately.
+ *  Used only when a single key is configured (multi-key rotates instead). */
 async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 2,
@@ -175,9 +244,14 @@ function trimHistory(messages: Message[], maxMessages: number): Message[] {
   return [first, ...tail];
 }
 
+/* -------------------------------------------------------------------------- */
+/*  OCR                                                                       */
+/* -------------------------------------------------------------------------- */
+
 export async function extractTextFromFrame(base64: string): Promise<string> {
-  const key = process.env.GEMINI_API_KEY || "";
-  console.log(`[Gemini] OCR Request | Key: ...${key.slice(-4)}`);
+  const keys = getKeys();
+  const singleKey = keys.length === 1;
+
   const cleanBase64 = stripDataUrlPrefix(base64);
   const content = [
     {
@@ -192,42 +266,55 @@ export async function extractTextFromFrame(base64: string): Promise<string> {
   let sawTransientRateLimit = false;
   let lastRetryAfterSeconds: number | undefined;
 
-  // Try each model in priority order; fall back on quota errors.
+  // Try each model in priority order; for each model, try each key.
   for (const modelName of MODEL_PRIORITY) {
-    try {
-      const model = getModel(modelName, undefined, 512);
-      const result = await withRetry(() => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS }));
-      return result.response.text().trim();
-    } catch (error) {
-      if (isQuotaError(error)) {
-        if (!isQuotaExhaustedError(error)) {
-          sawTransientRateLimit = true;
-          lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+    const keyOrder = getKeyOrder();
+
+    for (const keyIdx of keyOrder) {
+      try {
+        console.log(`[Gemini] OCR Request | Model: ${modelName} | Key: ${keyTag(keyIdx)}`);
+        const model = getModel(keyIdx, modelName, undefined, 512);
+
+        const callFn = () => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS });
+        // Single key: retry with backoff. Multi-key: just try next key.
+        const result = singleKey ? await withRetry(callFn) : await callFn();
+
+        return result.response.text().trim();
+      } catch (error) {
+        if (isQuotaError(error)) {
+          cooldownKey(keyIdx);
+          if (!isQuotaExhaustedError(error)) {
+            sawTransientRateLimit = true;
+            lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+          }
+          console.warn(`Model ${modelName} Key ${keyTag(keyIdx)} quota hit, trying next...`);
+          continue;
         }
-        console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
-        continue;
+        if (isConfigurationError(error)) {
+          throw new ConfigurationError((error as Error).message);
+        }
+        if (isModelNotFoundError(error)) {
+          console.warn(`Model ${modelName} not found, skipping...`);
+          break; // No point trying other keys for a model that doesn't exist
+        }
+        throw error;
       }
-      if (isConfigurationError(error)) {
-        throw new ConfigurationError((error as Error).message);
-      }
-      // If model not found (404), log and skip to next model
-      if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {
-        console.warn(`Model ${modelName} not found, skipping fallback...`);
-        continue;
-      }
-      throw error;
     }
   }
 
   if (sawTransientRateLimit) {
     throw new RateLimitedError(
-      `Gemini OCR is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
+      "Gemini OCR is temporarily rate limited. Please retry in a few seconds.",
       lastRetryAfterSeconds
     );
   }
 
-  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`);
+  throw new QuotaExhaustedError("all models", "All API keys exhausted all models. Check usage in Google AI Studio or add more keys.");
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Streaming chat                                                            */
+/* -------------------------------------------------------------------------- */
 
 function toGeminiRole(role: Message["role"]): "user" | "model" {
   return role === "assistant" ? "model" : "user";
@@ -263,9 +350,9 @@ export async function* streamChat(
   image?: ImageInput,
   maxOutputTokens = 1024
 ): AsyncGenerator<string> {
-  const key = process.env.GEMINI_API_KEY || "";
-  console.log(`[Gemini] Chat Request | Key: ...${key.slice(-4)}`);
-  
+  const keys = getKeys();
+  const singleKey = keys.length === 1;
+
   if (messages.length === 0) {
     return;
   }
@@ -293,50 +380,58 @@ export async function* streamChat(
   let sawTransientRateLimit = false;
   let lastRetryAfterSeconds: number | undefined;
 
-  // Try each model in priority order; fall back on quota errors.
+  // Try each model in priority order; for each model, try each key.
   for (const modelName of MODEL_PRIORITY) {
-    try {
-      const model = getModel(modelName, systemPrompt, maxOutputTokens);
-      const chat = model.startChat({ history: historyParts });
-      const result = await withRetry(() => chat.sendMessageStream(parts));
+    const keyOrder = getKeyOrder();
 
-      for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
-        try {
-          const text = chunk.text();
-          if (text) {
-            yield text;
+    for (const keyIdx of keyOrder) {
+      try {
+        console.log(`[Gemini] Chat Request | Model: ${modelName} | Key: ${keyTag(keyIdx)}`);
+        const model = getModel(keyIdx, modelName, systemPrompt, maxOutputTokens);
+        const chat = model.startChat({ history: historyParts });
+
+        const callFn = () => chat.sendMessageStream(parts);
+        const result = singleKey ? await withRetry(callFn) : await callFn();
+
+        for await (const chunk of iterateWithChunkTimeout(result.stream, GEMINI_CHUNK_TIMEOUT_MS)) {
+          try {
+            const text = chunk.text();
+            if (text) {
+              yield text;
+            }
+          } catch {
+            continue;
           }
-        } catch {
+        }
+        return; // Success — exit both loops.
+      } catch (error) {
+        if (isQuotaError(error)) {
+          cooldownKey(keyIdx);
+          if (!isQuotaExhaustedError(error)) {
+            sawTransientRateLimit = true;
+            lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+          }
+          console.warn(`Model ${modelName} Key ${keyTag(keyIdx)} quota hit, trying next...`);
           continue;
         }
-      }
-      return; // Success — exit the model loop.
-    } catch (error) {
-      if (isQuotaError(error)) {
-        if (!isQuotaExhaustedError(error)) {
-          sawTransientRateLimit = true;
-          lastRetryAfterSeconds = extractRetryAfterSeconds(error) ?? lastRetryAfterSeconds;
+        if (isConfigurationError(error)) {
+          throw new ConfigurationError((error as Error).message);
         }
-        console.warn(`Model ${modelName} quota hit (${(error as Error).message}), trying next fallback...`);
-        continue;
+        if (isModelNotFoundError(error)) {
+          console.warn(`Model ${modelName} not found, skipping...`);
+          break; // No point trying other keys for a model that doesn't exist
+        }
+        throw error;
       }
-      if (isConfigurationError(error)) {
-        throw new ConfigurationError((error as Error).message);
-      }
-      // If model not found (404), log and skip to next model
-      if ((error as Error).message.includes("404") || (error as Error).message.includes("not found")) {
-        console.warn(`Model ${modelName} not found, skipping fallback...`);
-        continue;
-      }
-      throw error;
     }
   }
+
   if (sawTransientRateLimit) {
     throw new RateLimitedError(
-      `Gemini Chat is temporarily rate limited (Key: ...${key.slice(-4)}). Please retry in a few seconds.`,
+      "Gemini Chat is temporarily rate limited. Please retry in a few seconds.",
       lastRetryAfterSeconds
     );
   }
 
-  throw new QuotaExhaustedError("all models", `Key ending in ...${key.slice(-4)} exhausted all models. Check usage in Google AI Studio or restart server if key was updated.`);
+  throw new QuotaExhaustedError("all models", "All API keys exhausted all models. Check usage in Google AI Studio or add more keys.");
 }
