@@ -112,10 +112,12 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
       const msg = e.message || String(e);
       setError(msg.startsWith("API Error") ? msg : `Something went wrong: ${msg}`);
     } finally {
-      // Save partial text if stream was interrupted mid-response.
-      if (fullText.trim() && !streamCompleted) {
+      // Save partial or placeholder text to maintain user/assistant alternation.
+      if (!streamCompleted) {
         let finalText = fullText.trim();
-        if (!/[.!?]$/.test(finalText)) {
+        if (!finalText) {
+          finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
+        } else if (!/[.!?]$/.test(finalText)) {
           finalText += "...";
         }
         setMessages((current) => [...current, buildMessage("assistant", finalText)]);

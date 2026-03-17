@@ -426,10 +426,14 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       // stream timeout/error). This prevents the frustrating "response vanishes"
       // behaviour that occurred on iOS when the SSE stream dropped mid-response.
       // Append "..." to partial responses so the user knows it was cut short.
+      // When no text at all was received, add a placeholder so the message
+      // history maintains user/assistant alternation (Gemini requires this).
       setStreamingText("");
-      if (fullText.trim()) {
+      {
         let finalText = fullText.trim();
-        if (!streamCompleted && !/[.!?]$/.test(finalText)) {
+        if (!finalText) {
+          finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
+        } else if (!streamCompleted && !/[.!?]$/.test(finalText)) {
           finalText += "...";
         }
         const assistantMessage = buildMessage("assistant", finalText);

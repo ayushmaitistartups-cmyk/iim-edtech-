@@ -314,6 +314,27 @@ function toGeminiRole(role: Message["role"]): "user" | "model" {
   return role === "assistant" ? "model" : "user";
 }
 
+/** Gemini requires strict user/model/user/model role alternation.
+ *  Merge consecutive same-role messages so the API doesn't silently fail. */
+function sanitizeHistory(
+  history: Array<{ role: "user" | "model"; parts: Array<{ text: string }> }>
+): Array<{ role: "user" | "model"; parts: Array<{ text: string }> }> {
+  if (history.length <= 1) return history;
+
+  const merged: typeof history = [history[0]];
+  for (let i = 1; i < history.length; i++) {
+    const prev = merged[merged.length - 1];
+    const curr = history[i];
+    if (curr.role === prev.role) {
+      // Merge text into previous entry
+      prev.parts[0].text += "\n" + curr.parts[0].text;
+    } else {
+      merged.push(curr);
+    }
+  }
+  return merged;
+}
+
 /** Wraps an async iterable so each .next() call has a per-chunk timeout. */
 async function* iterateWithChunkTimeout<T>(
   stream: AsyncIterable<T>,
@@ -351,10 +372,12 @@ export async function* streamChat(
 
   const trimmed = trimHistory(messages, MAX_CONTEXT_MESSAGES);
 
-  const historyParts = trimmed.slice(0, -1).map((message) => ({
-    role: toGeminiRole(message.role),
-    parts: [{ text: message.content }]
-  }));
+  const historyParts = sanitizeHistory(
+    trimmed.slice(0, -1).map((message) => ({
+      role: toGeminiRole(message.role),
+      parts: [{ text: message.content }]
+    }))
+  );
 
   const latest = trimmed[trimmed.length - 1];
   const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];

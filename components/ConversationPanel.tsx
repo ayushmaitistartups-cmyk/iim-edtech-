@@ -187,10 +187,12 @@ export function ConversationPanel({
         const msg = e instanceof Error ? e.message : String(e);
         setError(msg);
       } finally {
-        // Save partial text if stream was interrupted mid-response.
-        if (fullText.trim() && !streamCompleted) {
+        // Save partial or placeholder text to maintain user/assistant alternation.
+        if (!streamCompleted) {
           let finalText = fullText.trim();
-          if (!/[.!?]$/.test(finalText)) {
+          if (!finalText) {
+            finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
+          } else if (!/[.!?]$/.test(finalText)) {
             finalText += "...";
           }
           onAddAssistantMessage(finalText);
