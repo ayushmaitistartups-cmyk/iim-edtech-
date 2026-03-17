@@ -25,7 +25,7 @@ interface ConversationPanelProps {
   className?: string;
 }
 
-const CONTEXT_WINDOW = 8;
+const CONTEXT_WINDOW = 16;
 
 function trimMessagesForCost(messages: Message[]): Message[] {
   if (messages.length <= CONTEXT_WINDOW) {

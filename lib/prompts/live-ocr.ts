@@ -31,9 +31,9 @@ export function buildAdaptiveLiveOCRPrompt(exam: ExamType, ctx: HintContext): st
   let hintStrategy: string;
   if (stuckCount === 0) {
     hintStrategy = "Give a clear, specific next step referencing actual values on the page. For example: 'Now substitute A(1,1) into the formula — that means x₁=1 and y₁=1.' Be concrete, not vague. Tell them exactly what to do next.";
-  } else if (stuckCount <= 2) {
+  } else if (stuckCount === 1) {
     hintStrategy = "The student is struggling. Give the formula or method they need WITH the first substitution started. For example: 'The centroid formula is G = ((x₁+x₂+x₃)/3, (y₁+y₂+y₃)/3). With A(1,1) and B(4,5), you get G_x = (1+4+k)/3. Can you simplify?' Don't just name the concept — show them how to start.";
-  } else if (stuckCount <= 4) {
+  } else if (stuckCount <= 3) {
     hintStrategy = "The student needs significant help. Walk through the solution step by step: show the working for 2-3 steps, then ask them to complete only the final step. For example: 'Step 1: x₁=1, y₁=1. Step 2: G_x = (1+4+4)/3 = 3. Now do the same for G_y — what do you get?' Give them the partial working.";
   } else {
     hintStrategy = "The student has been stuck for too many turns. Provide the complete worked solution with clear explanation of every step. They need to see how it is done so they can learn from the example. Show all the working and explain the reasoning behind each step.";
