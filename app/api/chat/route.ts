@@ -160,10 +160,10 @@ export async function POST(request: Request): Promise<Response> {
     const rawConcept = typeof payload.currentConcept === "string" ? payload.currentConcept : "general";
     const currentConcept = VALID_CONCEPTS.includes(rawConcept) ? rawConcept : "general";
     systemPrompt = buildAdaptiveLiveOCRPrompt(exam, { stuckCount, currentConcept });
-    maxTokens = 512;
+    maxTokens = 700;
   } else if (mode === "live_ocr") {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
-    maxTokens = 512;
+    maxTokens = 700;
   } else {
     systemPrompt = SEND_IMAGE_SYSTEM_PROMPT;
     maxTokens = 1024;

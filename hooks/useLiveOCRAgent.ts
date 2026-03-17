@@ -38,6 +38,7 @@ interface UseLiveOCRAgentResult {
   submitText: (text: string) => Promise<void>;
   toggleAutoScan: () => void;
   transcript: string;
+  unlockAudio: () => void;
 }
 
 const MIN_WORDS = 3;
@@ -229,7 +230,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
 
   const pageContext = useMemo(() => buildPageContext(scanHistory), [scanHistory]);
 
-  const { speak, stop: stopSpeaking, isSpeaking } = useVoiceOutput();
+  const { speak, stop: stopSpeaking, isSpeaking, unlockAudio } = useVoiceOutput();
   const { transcript, isListening, isSupported, startListening, stopListening } = useVoiceInput({
     onTranscript: (text) => {
       void submitText(text);
@@ -679,6 +680,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       submitText,
       toggleAutoScan,
       transcript,
+      unlockAudio,
     }),
     [
       autoScanEnabled,
@@ -700,7 +702,8 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       streamingText,
       submitText,
       toggleAutoScan,
-      transcript
+      transcript,
+      unlockAudio,
     ]
   );
 }

@@ -7,6 +7,8 @@ interface UseVoiceOutputResult {
   stop: () => void;
   isSpeaking: boolean;
   isSupported: boolean;
+  /** Call once inside a user gesture (tap) to unlock iOS audio for the session. */
+  unlockAudio: () => void;
 }
 
 /** Minimum safety timeout per utterance (ms). */
@@ -86,6 +88,7 @@ export function useVoiceOutput(): UseVoiceOutputResult {
   const resumeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const isIOSRef = useRef(false);
+  const audioUnlockedRef = useRef(false);
 
   const supported = typeof window !== "undefined" && !!window.speechSynthesis;
 
@@ -244,5 +247,16 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     };
   }, []);
 
-  return { speak, stop, isSpeaking, isSupported: supported };
+  const unlockAudio = useCallback(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    if (audioUnlockedRef.current) return;
+    audioUnlockedRef.current = true;
+    // iOS requires a speak() call inside a user gesture to permit future synthesis
+    const silent = new SpeechSynthesisUtterance(" ");
+    silent.volume = 0;
+    silent.rate = 10;
+    window.speechSynthesis.speak(silent);
+  }, []);
+
+  return { speak, stop, isSpeaking, isSupported: supported, unlockAudio };
 }

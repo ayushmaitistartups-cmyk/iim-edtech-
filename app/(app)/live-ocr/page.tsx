@@ -79,7 +79,8 @@ export default function LiveOCRPage(): JSX.Element {
     streamingText,
     submitText,
     toggleAutoScan,
-    transcript
+    transcript,
+    unlockAudio,
   } = useLiveOCRAgent(exam, videoRef, voiceOutputEnabled);
 
   const wakeWordShouldRun =
@@ -431,6 +432,7 @@ export default function LiveOCRPage(): JSX.Element {
                   ].join(" ")}
                   disabled={!microphoneAvailable}
                   onClick={() => {
+                    unlockAudio(); // iOS: unlock speech synthesis on first user gesture
                     if (status === "thinking" || status === "speaking") {
                       interrupt();
                       return;
