@@ -344,21 +344,27 @@ async function* iterateWithChunkTimeout<T>(
   timeoutMs: number
 ): AsyncGenerator<T> {
   const iterator = stream[Symbol.asyncIterator]();
-  while (true) {
-    let timerId: ReturnType<typeof setTimeout> | undefined;
-    const result = await Promise.race([
-      iterator.next(),
-      new Promise<never>((_, reject) => {
-        timerId = setTimeout(
-          () => reject(new Error("Gemini stream chunk timed out")),
-          timeoutMs
-        );
-      }),
-    ]).finally(() => {
-      if (timerId !== undefined) clearTimeout(timerId);
-    });
-    if (result.done) break;
-    yield result.value;
+  try {
+    while (true) {
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        iterator.next(),
+        new Promise<never>((_, reject) => {
+          timerId = setTimeout(
+            () => reject(new Error("Gemini stream chunk timed out")),
+            timeoutMs
+          );
+        }),
+      ]).finally(() => {
+        if (timerId !== undefined) clearTimeout(timerId);
+      });
+      if (result.done) break;
+      yield result.value;
+    }
+  } finally {
+    if (typeof iterator.return === 'function') {
+      await iterator.return();
+    }
   }
 }
 

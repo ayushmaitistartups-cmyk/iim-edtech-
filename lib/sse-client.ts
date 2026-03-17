@@ -66,7 +66,15 @@ export async function consumeSSE(
         }
       }
     }
+  } catch (error) {
+    // If we throw (e.g. from timeout or AbortSignal), we must cancel the reader
+    // otherwise releaseLock() throws "Cannot release lock with pending read() calls"
+    reader.cancel(error).catch(() => {});
+    throw error;
   } finally {
-    reader.releaseLock();
+    // Only release lock if we aren't already cancelling which handles it
+    try {
+      reader.releaseLock();
+    } catch {}
   }
 }

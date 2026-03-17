@@ -164,7 +164,10 @@ export async function POST(request: Request): Promise<Response> {
     maxTokens = 2048;
   }
 
-  const MAX_STREAM_DURATION_MS = 55_000;
+  // Maximum time for the ENTIRE stream to complete.
+  // Increased from 55s to 5 minutes so long, valid math explanations aren't terminated mid-response.
+  // Per-chunk timeouts already protect against actual stalls.
+  const MAX_STREAM_DURATION_MS = 300_000;
 
   return sseResponse(async (controller) => {
     const encoder = new TextEncoder();
