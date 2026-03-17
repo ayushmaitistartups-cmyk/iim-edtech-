@@ -3,7 +3,7 @@ import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { sseResponse } from "@/lib/api";
 import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { uploadTemporaryImage } from "@/lib/supabase";
-import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit";
+
 import type { Message } from "@/types";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -23,11 +23,6 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const rl = rateLimit(rateLimitKey(userId, "image"), { maxRequests: 10, windowMs: 60_000 });
-  if (!rl.success) {
-    return rateLimitResponse(rl.resetMs);
   }
 
   let formData: FormData;
