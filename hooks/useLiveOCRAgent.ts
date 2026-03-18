@@ -224,6 +224,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   const turnInProgressRef = useRef<boolean>(false);
   const autoScanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoScanningRef = useRef(false);
+  const hasStartedConversationRef = useRef<boolean>(false);
   // Shadow volatile state in refs so runAutoScan stays a stable callback.
   const isScanningRef = useRef(false);
   const quotaExhaustedRef = useRef(false);
@@ -343,6 +344,12 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       messagesRef.current = nextMessages;
       setMessages(nextMessages);
       setStatus("thinking");
+
+      // Trigger initial scan on first user message
+      if (!hasStartedConversationRef.current) {
+        hasStartedConversationRef.current = true;
+        void runAutoScan();
+      }
 
       const session = sessionRef.current;
       const stuckCount = session.conceptMap[session.currentConcept]?.stuckCount ?? 0;
@@ -615,6 +622,7 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
   }, [captureFrame]);
 
   // Start/stop the auto-scan interval when enabled or quota state changes.
+  // Only start interval AFTER user has started a conversation (triggered in sendStudentTurn).
   useEffect(() => {
     if (!autoScanEnabled || quotaExhausted) {
       if (autoScanIntervalRef.current) {
@@ -624,16 +632,17 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
       return;
     }
 
+    // Only start interval if user has started a conversation
+    if (!hasStartedConversationRef.current) {
+      return;
+    }
+
     autoScanIntervalRef.current = setInterval(() => {
       void runAutoScan();
     }, AUTO_SCAN_INTERVAL_MS);
 
-    // First scan after a short delay (give the camera time to initialise).
-    const initialTimer = setTimeout(() => void runAutoScan(), 2000);
-
     return () => {
       if (autoScanIntervalRef.current) clearInterval(autoScanIntervalRef.current);
-      clearTimeout(initialTimer);
       autoScanIntervalRef.current = null;
     };
   }, [autoScanEnabled, quotaExhausted, runAutoScan]);
