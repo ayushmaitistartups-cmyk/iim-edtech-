@@ -508,6 +508,11 @@ export async function* streamChat(
               console.warn(`[Gemini] Chunk timeout, continuing stream...`);
               continue;
             }
+            // Check if stream ended (AbortError or stream done)
+            if (errorMsg.includes("abort") || errorMsg.includes("Aborted")) {
+              console.warn(`[Gemini] Stream aborted, flushing buffer...`);
+              break;
+            }
             yield `\n\n[Response stopped: ${errorMsg}]`;
             break;
           }

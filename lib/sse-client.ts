@@ -48,6 +48,16 @@ export async function consumeSSE(
       });
 
       if (done) {
+        // Flush any remaining buffer data before ending
+        if (buffer.length > 0) {
+          const dataLines = buffer
+            .split("\n")
+            .filter((line) => line.startsWith("data: "))
+            .map((line) => line.slice(6));
+          for (const data of dataLines) {
+            if (data) onData(data);
+          }
+        }
         break;
       }
 
