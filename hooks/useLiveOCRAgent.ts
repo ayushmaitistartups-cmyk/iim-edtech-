@@ -57,6 +57,14 @@ const DEEP_SCAN_WITH_FOLLOW_UP_PATTERN = new RegExp(
   "i"
 );
 
+// Verification intent patterns - trigger deep scan when user asks to check/verify their work
+const VERIFY_PREFIX = String.raw`(?:check|verify|is|am|are|was|were)\s+(?:my|this|the|their)?\s*(?:answer|work|solution|step|calculation|result)`;
+const VERIFY_EXACT_PATTERN = new RegExp(`^${VERIFY_PREFIX}[.!?]*$`, "i");
+const VERIFY_WITH_FOLLOW_UP_PATTERN = new RegExp(
+  `^${VERIFY_PREFIX}(?:\\s*(?:,|and|then)\\s+)(.+)$`,
+  "i"
+);
+
 function buildMessage(role: Message["role"], content: string): Message {
   return {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -138,18 +146,32 @@ function parseDeepScanCommand(text: string): { followUpText: string | null; shou
     return { followUpText: null, shouldScan: false };
   }
 
-  const followUpMatch = normalized.match(DEEP_SCAN_WITH_FOLLOW_UP_PATTERN);
-  if (followUpMatch) {
-    const followUpText = followUpMatch[1]?.trim() ?? "";
+  // Check follow-up patterns (DEEP_SCAN)
+  const deepScanFollowUp = normalized.match(DEEP_SCAN_WITH_FOLLOW_UP_PATTERN);
+  if (deepScanFollowUp) {
+    const followUpText = deepScanFollowUp[1]?.trim() ?? "";
     return {
       followUpText: followUpText.length > 0 ? followUpText : null,
       shouldScan: true
     };
   }
 
+  // Check follow-up patterns (VERIFY)
+  const verifyFollowUp = normalized.match(VERIFY_WITH_FOLLOW_UP_PATTERN);
+  if (verifyFollowUp) {
+    const followUpText = verifyFollowUp[1]?.trim() ?? "";
+    return {
+      followUpText: followUpText.length > 0 ? followUpText : null,
+      shouldScan: true
+    };
+  }
+
+  // Check exact patterns for both DEEP_SCAN and VERIFY
+  const shouldScan = DEEP_SCAN_EXACT_PATTERN.test(normalized) || VERIFY_EXACT_PATTERN.test(normalized);
+  
   return {
     followUpText: null,
-    shouldScan: DEEP_SCAN_EXACT_PATTERN.test(normalized)
+    shouldScan
   };
 }
 
