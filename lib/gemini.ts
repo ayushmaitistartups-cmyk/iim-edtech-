@@ -462,7 +462,9 @@ export async function* streamChat(
                     buffer = buffer.slice(possiblePartialStart);
                     break;
                   } else {
-                    yield buffer;
+                    if (buffer.length > 0) {
+                      yield buffer;
+                    }
                     buffer = "";
                   }
                 }
@@ -483,6 +485,10 @@ export async function* streamChat(
                   if (possiblePartialEnd !== -1) {
                      buffer = buffer.slice(possiblePartialEnd);
                   } else {
+                     if (buffer.length > 0) {
+                       console.log(`[Gemini] Yielded ${buffer.length} pending think tokens at stream end`);
+                       yield buffer;
+                     }
                      buffer = "";
                   }
                   break;
@@ -499,7 +505,10 @@ export async function* streamChat(
           }
         }
         
-        if (buffer.length > 0 && !insideThink) {
+        if (buffer.length > 0) {
+          if (insideThink) {
+            console.log(`[Gemini] Final flush: yielded ${buffer.length} pending think tokens`);
+          }
           yield buffer;
         }
         
