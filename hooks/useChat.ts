@@ -129,18 +129,16 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         setMessages((current) => [...current, buildMessage("assistant", fullText.trim())]);
       }
     } catch (e: any) {
-      // Silently ignore aborts (user sent a new message or navigated away)
       if (e.name === "AbortError") {
         return;
       }
-      const msg = e.message || String(e);
-      setError(msg.startsWith("API Error") ? msg : `Something went wrong: ${msg}`);
+      const errorMsg = e.message || String(e);
+      setError(errorMsg);
 
-      // Only append fallback for real errors, not aborts
       if (!streamCompleted) {
         let finalText = fullText.trim();
         if (!finalText) {
-          finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
+          finalText = `[Error] ${errorMsg}`;
         } else if (!/[.!?]$/.test(finalText)) {
           finalText += "...";
         }
