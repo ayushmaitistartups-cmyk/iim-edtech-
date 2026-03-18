@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { cleanTextForTTS } from "@/lib/utils/latex-to-spoken";
+import { useAudioDeviceMonitor } from "@/hooks/useAudioDeviceMonitor";
 
 interface UseVoiceOutputResult {
   speak: (text: string) => void;
@@ -142,13 +144,8 @@ export function useVoiceOutput(): UseVoiceOutputResult {
     }
 
     const sentence = queueRef.current.shift()!;
-    // Strip markdown/LaTeX for cleaner TTS
-    const clean = sentence
-      .replace(/\$\$[^$]*\$\$/g, "equation")
-      .replace(/\$[^$]*\$/g, "expression")
-      .replace(/[*_~`#>]/g, "")
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .trim();
+    // Convert LaTeX to spoken words and strip markdown
+    const clean = cleanTextForTTS(sentence);
 
     if (!clean) {
       speakNext();
@@ -199,6 +196,28 @@ export function useVoiceOutput(): UseVoiceOutputResult {
       speakNext();
     }, timeoutMs);
   }, [clearResumeInterval, startResumeInterval]);
+
+  // Re-pick voice and reset synthesis when audio devices change (earphone plug/unplug)
+  useAudioDeviceMonitor({
+    enabled: supported,
+    onDeviceChange: useCallback(() => {
+      if (typeof window === "undefined" || !window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      voiceRef.current = pickVoice();
+
+      // If we were speaking, restart the queue after a delay for device to settle
+      if (activeRef.current && queueRef.current.length > 0) {
+        setTimeout(() => {
+          if (queueRef.current.length > 0) {
+            speakNext();
+          } else {
+            activeRef.current = false;
+            setIsSpeaking(false);
+          }
+        }, 500);
+      }
+    }, [speakNext])
+  });
 
   const speak = useCallback(
     (text: string) => {

@@ -7,6 +7,7 @@ import type {
   SpeechRecognitionEvent,
   SpeechRecognitionInstance,
 } from "@/types/speech";
+import { useAudioDeviceMonitor } from "@/hooks/useAudioDeviceMonitor";
 
 const WAKE_PHRASES = [
   "hello bro",
@@ -145,6 +146,21 @@ export function useWakeWord({ enabled, onWakeWord }: UseWakeWordOptions): UseWak
       stopWake();
     }
   }, [enabled, startWake, stopWake]);
+
+  // Recover from audio device changes (earphone plug/unplug)
+  useAudioDeviceMonitor({
+    enabled: enabled && isSupported,
+    onDeviceChange: useCallback(() => {
+      if (!enabledRef.current) return;
+      // Stop current recognition and restart after device settles
+      stopWake();
+      setTimeout(() => {
+        if (enabledRef.current) {
+          startWake();
+        }
+      }, 500);
+    }, [stopWake, startWake])
+  });
 
   // Cleanup on unmount — set flags first so any in-flight restart timers abort
   useEffect(() => {

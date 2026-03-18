@@ -7,6 +7,7 @@ import type {
   SpeechRecognitionEvent,
   SpeechRecognitionInstance,
 } from "@/types/speech";
+import { useAudioDeviceMonitor } from "@/hooks/useAudioDeviceMonitor";
 
 interface UseVoiceInputOptions {
   onTranscript?: (text: string) => void;
@@ -119,6 +120,22 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): UseVoiceInput
     }
     setIsListening(false);
   }, []);
+
+  // Recover from audio device changes (earphone plug/unplug)
+  useAudioDeviceMonitor({
+    enabled: isSupported,
+    onDeviceChange: useCallback(() => {
+      if (!recognitionRef.current) return;
+      // Stop and restart recognition so it picks up the new mic
+      try { recognitionRef.current.abort(); } catch { /* ignore */ }
+      recognitionRef.current = null;
+      setIsListening(false);
+      // Restart after a short delay to let the OS settle the new device
+      setTimeout(() => {
+        startListening();
+      }, 500);
+    }, [startListening])
+  });
 
   // Cleanup on unmount
   useEffect(() => {

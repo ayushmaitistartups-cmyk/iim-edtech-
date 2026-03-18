@@ -3,6 +3,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import type { ExamType } from "@/types/exam";
 import type { Message } from "@/types";
+import { cleanTextForTTS } from "@/lib/utils/latex-to-spoken";
 
 interface UseVoiceAgentParams {
   exam: ExamType;
@@ -71,17 +72,9 @@ function parseSSEData(raw: string): string[] {
 }
 
 function splitIntoSentences(text: string): string[] {
-  // Match sentence-ending punctuation followed by space or end
   const sentences = text.split(/(?<=[.!?।])\s+/);
   return sentences
-    .map((s) =>
-      s
-        .replace(/\$\$[^$]*\$\$/g, "equation")
-        .replace(/\$[^$]*\$/g, "expression")
-        .replace(/[*_~`#>]/g, "")
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-        .trim()
-    )
+    .map((s) => cleanTextForTTS(s))
     .filter((s) => s.length > 0);
 }
 
@@ -151,13 +144,7 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
   const speakSentence = useCallback((text: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
 
-    const clean = text
-      .replace(/\$\$[^$]*\$\$/g, "equation")
-      .replace(/\$[^$]*\$/g, "expression")
-      .replace(/[*_~`#>]/g, "")
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .trim();
-
+    const clean = cleanTextForTTS(text);
     if (!clean) return;
 
     const utterance = new SpeechSynthesisUtterance(clean);

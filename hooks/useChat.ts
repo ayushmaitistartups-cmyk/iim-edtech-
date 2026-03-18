@@ -55,13 +55,14 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
     options: SendUserMessageOptions
   ): Promise<void> => {
     const trimmed = text.trim();
-    if (!trimmed || isLoading) {
+    if (!trimmed) {
       return;
     }
 
     // Cancel previous request if still in progress
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      abortControllerRef.current = null;
     }
     abortControllerRef.current = new AbortController();
 
@@ -128,21 +129,24 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         setMessages((current) => [...current, buildMessage("assistant", fullText.trim())]);
       }
     } catch (e: any) {
+      // Silently ignore aborts (user sent a new message or navigated away)
+      if (e.name === "AbortError") {
+        return;
+      }
       const msg = e.message || String(e);
       setError(msg.startsWith("API Error") ? msg : `Something went wrong: ${msg}`);
-    } finally {
-      // Save partial or placeholder text to maintain user/assistant alternation.
+
+      // Only append fallback for real errors, not aborts
       if (!streamCompleted) {
         let finalText = fullText.trim();
-        if (!finalText && !error) {
+        if (!finalText) {
           finalText = "Sorry, I couldn't process that. Could you rephrase or try again?";
         } else if (!/[.!?]$/.test(finalText)) {
           finalText += "...";
         }
-        if (finalText) {
-          setMessages((current) => [...current, buildMessage("assistant", finalText)]);
-        }
+        setMessages((current) => [...current, buildMessage("assistant", finalText)]);
       }
+    } finally {
       setStreamingText("");
       setIsLoading(false);
     }
