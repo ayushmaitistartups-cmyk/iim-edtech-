@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { ConfigurationError, extractTextFromFrame, QuotaExhaustedError, RateLimitedError } from "@/lib/gemini";
-
 import { uploadScanImage, saveScanLog } from "@/lib/supabase";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 interface OCRRequestBody {
   image?: unknown;
@@ -14,6 +14,14 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimit = checkRateLimit(`ocr:${userId}`, { windowMs: 60_000, maxRequests: 15 });
+  if (!rateLimit.allowed) {
+    return Response.json(
+      { error: "Rate limit exceeded", retryAfterSeconds: Math.ceil((rateLimit.resetTime - Date.now()) / 1000) },
+      { status: 429 }
+    );
   }
 
   let payload: OCRRequestBody;

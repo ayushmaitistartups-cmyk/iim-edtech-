@@ -125,8 +125,28 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
     window.speechSynthesis.addEventListener("voiceschanged", pickVoice);
     return () => {
       window.speechSynthesis.removeEventListener("voiceschanged", pickVoice);
+      window.speechSynthesis.cancel();
     };
   }, [language]);
+
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.abort();
+        } catch {
+          // Already stopped
+        }
+      }
+      if (abortRef.current) {
+        abortRef.current.abort();
+      }
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
 
   const speakSentence = useCallback((text: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;

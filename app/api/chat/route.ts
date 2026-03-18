@@ -4,6 +4,7 @@ import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat }
 import { buildAdaptiveLiveOCRPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
 import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
@@ -103,6 +104,14 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimit = checkRateLimit(`chat:${userId}`, { windowMs: 60_000, maxRequests: 20 });
+  if (!rateLimit.allowed) {
+    return Response.json(
+      { error: "Rate limit exceeded", retryAfterSeconds: Math.ceil((rateLimit.resetTime - Date.now()) / 1000) },
+      { status: 429 }
+    );
   }
 
   let payload: ChatRequestBody;

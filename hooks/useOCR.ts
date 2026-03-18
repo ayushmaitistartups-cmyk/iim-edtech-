@@ -75,6 +75,7 @@ export function useOCR({
   const previousTextRef = useRef<string>("");
   const previousFrameHashRef = useRef<string>("");
   const consecutiveFailsRef = useRef<number>(0);
+  const quotaExhaustedTimeRef = useRef<number>(0);
 
   const scanNow = async (): Promise<string | null> => {
     if (!enabled || quotaExhausted || isScanning) {
@@ -99,14 +100,22 @@ export function useOCR({
           const data = await response.json().catch(() => ({}));
           if (data.error === "quota_exhausted") {
             setQuotaExhausted(true);
+            quotaExhaustedTimeRef.current = Date.now();
             return null;
           }
           consecutiveFailsRef.current += 1;
           if (consecutiveFailsRef.current >= 3) {
             setQuotaExhausted(true);
+            quotaExhaustedTimeRef.current = Date.now();
           }
         }
         return null;
+      }
+
+      // Reset quota exhaustion after 60 seconds
+      if (quotaExhausted && Date.now() - quotaExhaustedTimeRef.current > 60_000) {
+        setQuotaExhausted(false);
+        consecutiveFailsRef.current = 0;
       }
 
       consecutiveFailsRef.current = 0;

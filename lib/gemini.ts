@@ -27,8 +27,8 @@ const GEMINI_OCR_TIMEOUT_MS = 25_000;
 const GEMINI_INITIAL_CONNECTION_TIMEOUT_MS = 20_000;
 
 /** Maximum time to wait for any single chunk during streaming (ms).
- *  Must be well below SSE_READ_TIMEOUT_MS (25s) to avoid client/server races. */
-const GEMINI_CHUNK_TIMEOUT_MS = 30_000;
+ *  Must be well below SSE_READ_TIMEOUT_MS (45s) to avoid client/server races. */
+const GEMINI_CHUNK_TIMEOUT_MS = 60_000;
 
 /** Models to try in order — best quality first, lite as fallback. */
 const MODEL_PRIORITY = [
@@ -496,11 +496,19 @@ export async function* streamChat(
               }
             }
           } catch (e: any) {
-            if (buffer.length > 0 && !insideThink) {
+            if (buffer.length > 0) {
+              if (insideThink) {
+                console.log(`[Gemini] Error in think block: yielded ${buffer.length} pending tokens before error`);
+              }
               yield buffer;
             }
             buffer = "";
-            yield `\n\n[Response stopped: ${e?.message ?? "content filtered"}]`;
+            const errorMsg = e?.message ?? "content filtered";
+            if (errorMsg.includes("timed out")) {
+              console.warn(`[Gemini] Chunk timeout, continuing stream...`);
+              continue;
+            }
+            yield `\n\n[Response stopped: ${errorMsg}]`;
             break;
           }
         }

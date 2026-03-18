@@ -35,6 +35,8 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
   const [streamingText, setStreamingText] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const lastMessageIdRef = useRef<string>("");
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -57,6 +59,22 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
       return;
     }
 
+    // Cancel previous request if still in progress
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
+    // Deduplicate: skip if same message sent recently
+    const messageId = `${trimmed}-${Date.now()}`;
+    if (lastMessageIdRef.current === trimmed && messagesRef.current.length > 0) {
+      const lastMsg = messagesRef.current[messagesRef.current.length - 1];
+      if (lastMsg?.role === "user" && lastMsg.content === trimmed) {
+        return;
+      }
+    }
+    lastMessageIdRef.current = messageId;
+
     setError("");
     setIsLoading(true);
     setStreamingText("");
@@ -71,6 +89,7 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortControllerRef.current?.signal,
         body: JSON.stringify({
           messages: nextMessages,
           mode: options.mode,
@@ -130,6 +149,10 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
   };
 
   const reset = (): void => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     messagesRef.current = [];
     setMessages([]);
     setStreamingText("");

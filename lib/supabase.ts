@@ -8,11 +8,20 @@ function requiredEnv(name: string): string {
   return value;
 }
 
+let _supabaseClient: SupabaseClient | null = null;
+
+function getSupabaseClient(): SupabaseClient {
+  if (!_supabaseClient) {
+    _supabaseClient = createClient(
+      requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
+      requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
+    );
+  }
+  return _supabaseClient;
+}
+
 export function createSupabaseServiceClient(): SupabaseClient {
-  return createClient(
-    requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-    requiredEnv("SUPABASE_SERVICE_ROLE_KEY")
-  );
+  return getSupabaseClient();
 }
 
 export interface UserRecordInput {

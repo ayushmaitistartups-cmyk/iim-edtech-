@@ -3,6 +3,7 @@ import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { sseResponse } from "@/lib/api";
 import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { uploadTemporaryImage } from "@/lib/supabase";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 import type { Message } from "@/types";
 
@@ -23,6 +24,14 @@ export async function POST(request: Request): Promise<Response> {
   const { userId } = await auth();
   if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const rateLimit = checkRateLimit(`image:${userId}`, { windowMs: 60_000, maxRequests: 10 });
+  if (!rateLimit.allowed) {
+    return Response.json(
+      { error: "Rate limit exceeded", retryAfterSeconds: Math.ceil((rateLimit.resetTime - Date.now()) / 1000) },
+      { status: 429 }
+    );
   }
 
   let formData: FormData;
