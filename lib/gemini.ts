@@ -142,13 +142,14 @@ function getModel(
   keyIdx: number,
   modelName: string,
   systemInstruction?: string,
-  maxOutputTokens = 1024
+  maxOutputTokens = 4096
 ): ReturnType<GoogleGenerativeAI["getGenerativeModel"]> {
   return getGenAIs()[keyIdx].getGenerativeModel({
     model: modelName,
     generationConfig: {
       maxOutputTokens,
-      temperature: 0.4
+      temperature: 0.4,
+      stopSequences: []
     },
     ...(systemInstruction && {
       systemInstruction
@@ -280,7 +281,7 @@ export async function extractTextFromFrame(base64: string, abortSignal?: AbortSi
     for (const keyIdx of keyOrder) {
       try {
         console.log(`[Gemini] OCR Request | Model: ${modelName} | Key: ${keyTag(keyIdx)}`);
-        const model = getModel(keyIdx, modelName, undefined, 512);
+        const model = getModel(keyIdx, modelName, undefined, 2048);
 
         const callFn = () => model.generateContent(content, { timeout: GEMINI_OCR_TIMEOUT_MS, signal: abortSignal });
         const result = await withRetry(callFn);

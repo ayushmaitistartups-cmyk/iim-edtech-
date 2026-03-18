@@ -92,7 +92,7 @@ export async function POST(request: Request): Promise<Response> {
     }, MAX_STREAM_DURATION_MS);
 
     try {
-      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image, 1024, abortController.signal)) {
+      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image, 4096, abortController.signal)) {
         if (timedOut) break;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
       }

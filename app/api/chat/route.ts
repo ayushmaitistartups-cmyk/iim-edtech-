@@ -151,7 +151,7 @@ export async function POST(request: Request): Promise<Response> {
       return Response.json({ error: "Invalid exam for voice agent mode" }, { status: 400 });
     }
     systemPrompt = buildVoiceAgentPrompt(exam);
-    maxTokens = 700;
+    maxTokens = 2048;
   } else if (mode === "live_ocr_agent") {
     const exam = resolveExam(payload.exam);
     if (!exam) {
@@ -164,13 +164,13 @@ export async function POST(request: Request): Promise<Response> {
     const rawConcept = typeof payload.currentConcept === "string" ? payload.currentConcept : "general";
     const currentConcept = VALID_CONCEPTS.includes(rawConcept) ? rawConcept : "general";
     systemPrompt = buildAdaptiveLiveOCRPrompt(exam, { stuckCount, currentConcept });
-    maxTokens = 1024;
+    maxTokens = 4096;
   } else if (mode === "live_ocr") {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
-    maxTokens = 1024;
+    maxTokens = 4096;
   } else {
     systemPrompt = SEND_IMAGE_SYSTEM_PROMPT;
-    maxTokens = 2048;
+    maxTokens = 4096;
   }
 
   // Maximum time for the ENTIRE stream to complete.
