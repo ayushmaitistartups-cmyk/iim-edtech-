@@ -3,6 +3,8 @@ import { ConfigurationError, extractTextFromFrame, QuotaExhaustedError, RateLimi
 import { uploadScanImage, saveScanLog } from "@/lib/supabase";
 import { checkRateLimit } from "@/lib/rate-limit";
 
+export const runtime = 'edge';
+
 interface OCRRequestBody {
   image?: unknown;
 }

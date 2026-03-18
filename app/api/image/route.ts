@@ -5,6 +5,8 @@ import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat }
 import { uploadTemporaryImage } from "@/lib/supabase";
 import { checkRateLimit } from "@/lib/rate-limit";
 
+export const runtime = 'edge';
+
 import type { Message } from "@/types";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;

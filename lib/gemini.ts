@@ -439,6 +439,9 @@ export async function* streamChat(
           ]);
         const result = await withRetry(callFn);
 
+        // Log finish reason for debugging (available after stream ends)
+        console.log(`[Gemini] Stream completed successfully`);
+
         let insideThink = false;
         let buffer = "";
 

@@ -6,6 +6,8 @@ import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
 import { checkRateLimit } from "@/lib/rate-limit";
 
+export const runtime = 'edge';
+
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
 
