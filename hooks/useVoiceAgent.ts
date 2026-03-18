@@ -5,6 +5,8 @@ import type { ExamType } from "@/types/exam";
 import type { Message } from "@/types";
 import { cleanTextForTTS } from "@/lib/utils/latex-to-spoken";
 
+import { useAudioDeviceMonitor } from "@/hooks/useAudioDeviceMonitor";
+
 interface UseVoiceAgentParams {
   exam: ExamType;
   language?: "en-IN" | "en-US";
@@ -368,6 +370,20 @@ export function useVoiceAgent({ exam, language = "en-IN" }: UseVoiceAgentParams)
     }
     setStatus("idle");
   }, []);
+
+  // Recover from audio device changes (earphone plug/unplug)
+  useAudioDeviceMonitor({
+    enabled: true,
+    onDeviceChange: useCallback(() => {
+      // If listening, stop and restart after device settles
+      if (status === "listening") {
+        interrupt();
+        setTimeout(() => {
+          startListening();
+        }, 500);
+      }
+    }, [status, interrupt, startListening])
+  });
 
   return {
     messages,

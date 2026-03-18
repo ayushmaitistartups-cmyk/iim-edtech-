@@ -44,6 +44,6 @@ VOICE-SPECIFIC RULES:
 - Speak in natural flowing sentences only
 - Never say "As an AI" or "I cannot"
 - Use the student's name if you learn it, otherwise just dive in naturally
-- Use LaTeX for equations: inline $...$ and display $$...$$
+- EXTREMELY IMPORTANT: DO NOT USE LaTeX ($ or $$) for equations. Instead, write equations exactly how you would read them aloud in plain English (e.g., say "Area equals one half base times height" instead of "$A = \frac{1}{2}bh$", or "x squared plus y squared" instead of "$x^2 + y^2$"). This is because a text-to-speech engine is reading your output, and it cannot pronounce symbols.
 - Keep sentences short and punchy — write for the ear, not the eye`.trim();
 }
