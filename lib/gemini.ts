@@ -24,18 +24,24 @@ const MAX_CONTEXT_MESSAGES = 16;
 const GEMINI_OCR_TIMEOUT_MS = 25_000;
 
 /** Timeout for the initial stream connection (ms). */
-const GEMINI_INITIAL_CONNECTION_TIMEOUT_MS = 20_000;
+const GEMINI_INITIAL_CONNECTION_TIMEOUT_MS = 30_000;
 
 /** Maximum time to wait for any single chunk during streaming (ms).
- *  Must be well below SSE_READ_TIMEOUT_MS (45s) to avoid client/server races. */
-const GEMINI_CHUNK_TIMEOUT_MS = 60_000;
+ *  Must be well below SSE_READ_TIMEOUT_MS (180s) to avoid client/server races. */
+const GEMINI_CHUNK_TIMEOUT_MS = 120_000;
 
-/** Models to try in order — best quality first, lite as fallback. */
-const MODEL_PRIORITY = [
+/** Models to try in order — best quality first, lite as fallback.
+ *  Note: gemini-2.5-flash-lite and gemini-2.0-flash-lite do NOT support images */
+const MODEL_PRIORITY_TEXT = [
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
+] as const;
+
+const MODEL_PRIORITY_IMAGE = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
 ] as const;
 
 /** How long to skip a key after it is rate-limited (ms). */
@@ -264,8 +270,11 @@ export async function extractTextFromFrame(base64: string, abortSignal?: AbortSi
   let sawTransientRateLimit = false;
   let lastRetryAfterSeconds: number | undefined;
 
+  // OCR uses images, so must use IMAGE models only
+  const modelsToTry = MODEL_PRIORITY_IMAGE;
+
   // Try each model in priority order; for each model, try each key.
-  for (const modelName of MODEL_PRIORITY) {
+  for (const modelName of modelsToTry) {
     const keyOrder = getKeyOrder();
 
     for (const keyIdx of keyOrder) {
@@ -404,8 +413,11 @@ export async function* streamChat(
   let sawTransientRateLimit = false;
   let lastRetryAfterSeconds: number | undefined;
 
+  // Use image models if image is present, otherwise use text models
+  const modelsToTry = image ? MODEL_PRIORITY_IMAGE : MODEL_PRIORITY_TEXT;
+
   // Try each model in priority order; for each model, try each key.
-  for (const modelName of MODEL_PRIORITY) {
+  for (const modelName of modelsToTry) {
     const keyOrder = getKeyOrder();
 
     for (const keyIdx of keyOrder) {

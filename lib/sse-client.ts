@@ -1,8 +1,8 @@
 export type SSEDataHandler = (value: string) => void;
 
 /** Maximum time to wait for the next SSE chunk from the server (ms).
- *  Must be above GEMINI_CHUNK_TIMEOUT_MS (60s) to avoid client/server races. */
-const SSE_READ_TIMEOUT_MS = 90_000;
+ *  Must be above GEMINI_CHUNK_TIMEOUT_MS (120s) to avoid client/server races. */
+const SSE_READ_TIMEOUT_MS = 180_000;
 
 export async function consumeSSE(
   response: Response,

@@ -5,15 +5,15 @@ export const RATE_LIMITS = {
   IMAGE: { windowMs: 60_000, maxRequests: 10 },
 } as const;
 
-// Timeouts (ms)
+// Timeouts (ms) - increased for long responses
 export const TIMEOUTS = {
-  GEMINI_CHUNK: 60_000,
-  GEMINI_INITIAL_CONNECTION: 20_000,
-  GEMINI_STREAM_TOTAL: 300_000,
-  SSE_READ: 90_000,
+  GEMINI_CHUNK: 120_000,
+  GEMINI_INITIAL_CONNECTION: 30_000,
+  GEMINI_STREAM_TOTAL: 600_000,
+  SSE_READ: 180_000,
   VOICE_AGENT: 90_000,
   VOICE_AGENT_CHUNK: 20_000,
-  OCR_NON_STREAMING: 25_000,
+  OCR_NON_STREAMING: 30_000,
 } as const;
 
 // Image Processing
@@ -24,12 +24,17 @@ export const IMAGE_LIMITS = {
   CROP_MAX_HEIGHT: 600,
 } as const;
 
-// AI Models
-export const MODEL_PRIORITY = [
+// AI Models - separate for text and image requests
+export const MODEL_PRIORITY_TEXT = [
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
   "gemini-2.0-flash-lite",
+] as const;
+
+export const MODEL_PRIORITY_IMAGE = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
 ] as const;
 
 // Context
