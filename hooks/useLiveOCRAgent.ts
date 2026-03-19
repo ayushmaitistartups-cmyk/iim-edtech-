@@ -698,6 +698,9 @@ export function useLiveOCRAgent(exam: ExamType, videoRef: RefObject<HTMLVideoEle
     baseInterrupt();
     setStreamingText("");
     setStatus("idle");
+    turnInProgressRef.current = false;
+    isScanningRef.current = false;
+    setIsScanning(false);
   }, [baseInterrupt]);
 
   const toggleAutoScan = useCallback(() => {

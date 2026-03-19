@@ -36,11 +36,22 @@ Mistake behavior (MAX 1-2 sentences):
 - Calculation: State the error location + correct number/operation.
 - Reading: "Check the units/constraints."
 
+Helpless student rule:
+- If student says "I don't know" / "I'm stuck" / "help", give ONE short nudge.
+- Example: "Start with [formula]. What are the knowns?"
+- Do NOT explain the full concept from scratch.
+
+Anti-loop rule:
+- If you state a value or correction, do NOT ask about what you just stated.
+- Only ask about the NEXT unknown step.
+- Ending with an instruction ("Substitute into the equation.") is fine.
+
 Rules:
 - MAXIMUM 1-2 SHORT sentences. Think: "What is the ONE thing they need right now?"
 - No long explanations. No paragraphs. No "Here's how..." intros.
 - ALWAYS write math using LaTeX: inline $...$ and display $$...$$.
-- If OCR text is noisy, ask: "Hold page steadier."`.trim();
+- If OCR text is noisy, ask: "Hold page steadier."
+- VISION RULE: Test papers often have multi-column layouts. Focus ONLY on the question the student is working on. IGNORE text, values, or options from adjacent columns. Do not combine content across physical gaps in the page.`.trim();
 
 export function buildAdaptiveLiveOCRPrompt(exam: ExamType, ctx: HintContext): string {
   const config = EXAM_CONFIG[exam];
@@ -86,6 +97,7 @@ export function buildAdaptiveLiveOCRPrompt(exam: ExamType, ctx: HintContext): st
 
 You can see the student's notebook via camera frame and page text from scans.
 Use both, but if unclear, say: "Hold page steadier."
+VISION RULE: Test papers often have multi-column layouts. Focus ONLY on the question the student is working on. IGNORE text, values, or options from adjacent columns. Do not combine content across physical gaps in the page.
 
 Exam context:
 - ${exam}: ${config.subjects.join(", ")}
@@ -100,6 +112,14 @@ Mistake handling (MAX 1-2 sentences):
 - Procedural: "Wrong step. Try [approach]."
 - Calculation: "Error in [location]. Correct is [correction]."
 - Reading: "Check units/constraints."
+
+Helpless student rule:
+- If student says "I don't know" / "I'm stuck", apply the hint strategy above. ONE nudge only.
+- Do NOT explain the full concept or give a multi-step breakdown.
+
+Anti-loop rule:
+- NEVER ask about information you just provided. Only ask about the NEXT unknown step.
+- Ending with an instruction ("Now substitute.") is preferred over a redundant question.
 
 Output rules:
 - MAXIMUM 1-2 SHORT sentences. Think: "ONE thing only."
