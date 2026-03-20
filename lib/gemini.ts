@@ -33,6 +33,7 @@ const GEMINI_CHUNK_TIMEOUT_MS = 120_000;
 /** Models to try in order — best quality first, lite as fallback.
  *  Note: gemini-2.5-flash-lite and gemini-2.0-flash-lite do NOT support images */
 const MODEL_PRIORITY_TEXT = [
+  "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
@@ -40,6 +41,7 @@ const MODEL_PRIORITY_TEXT = [
 ] as const;
 
 const MODEL_PRIORITY_IMAGE = [
+  "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
 ] as const;

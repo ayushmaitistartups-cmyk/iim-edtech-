@@ -26,6 +26,7 @@ export const IMAGE_LIMITS = {
 
 // AI Models - separate for text and image requests
 export const MODEL_PRIORITY_TEXT = [
+  "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
@@ -33,6 +34,7 @@ export const MODEL_PRIORITY_TEXT = [
 ] as const;
 
 export const MODEL_PRIORITY_IMAGE = [
+  "gemini-2.5-pro",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
 ] as const;
