@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { useLiveOCRAgent } from "@/hooks/useLiveOCRAgent";
+import { useWakeWord } from "@/hooks/useWakeWord";
 import { ExamType } from "@/types/exam";
 import { recordSessionActivity } from "@/lib/utils/analytics";
 import Link from "next/link";
@@ -24,6 +25,15 @@ export function LiveOcrClient({ exam }: { exam: ExamType }) {
     unlockAudio,
     error
   } = useLiveOCRAgent(exam, videoRef, true);
+
+  // Wake word: listen for "hello bro" etc. when idle, then start mic
+  useWakeWord({
+    enabled: status === "idle",
+    onWakeWord: useCallback(() => {
+      unlockAudio();
+      startListening();
+    }, [unlockAudio, startListening]),
+  });
 
   // Record session activity whenever messages are added
   useEffect(() => {
