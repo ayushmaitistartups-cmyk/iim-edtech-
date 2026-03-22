@@ -110,7 +110,7 @@ export function LiveOcrClient({ exam }: { exam: ExamType }) {
                   <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
                      <Mic className="w-8 h-8 text-white" />
                   </div>
-                  <p className="text-title text-white">Tap the microphone and ask a question about what you're pointing at.</p>
+                  <p className="text-title text-white">Tap the microphone and ask a question about what you&apos;re pointing at.</p>
                </div>
             ) : (
                messages.map((msg, i) => (
@@ -136,7 +136,7 @@ export function LiveOcrClient({ exam }: { exam: ExamType }) {
            <AnimatePresence>
              {transcript && (
                <motion.div initial={{opacity:0, y:10}} animate={{opacity:1, y:0}} exit={{opacity:0, y:10}} className="mb-4 text-center">
-                 <p className="text-sm text-white/70 italic">"{transcript}"</p>
+                 <p className="text-sm text-white/70 italic">&quot;{transcript}&quot;</p>
                </motion.div>
              )}
            </AnimatePresence>
@@ -144,6 +144,7 @@ export function LiveOcrClient({ exam }: { exam: ExamType }) {
            <div className="flex justify-center items-center gap-4">
              {status === 'thinking' || status === 'speaking' ? (
                 <button 
+                  aria-label="Stop"
                   onClick={interrupt}
                   className="w-16 h-16 rounded-full bg-weakness text-white flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-[0_0_30px_rgba(225,29,72,0.4)]"
                 >
@@ -151,6 +152,7 @@ export function LiveOcrClient({ exam }: { exam: ExamType }) {
                 </button>
              ) : (
                 <button 
+                  aria-label="Toggle Microphone"
                   onClick={() => {
                      unlockAudio();
                      status === 'listening' ? stopListening() : startListening();
