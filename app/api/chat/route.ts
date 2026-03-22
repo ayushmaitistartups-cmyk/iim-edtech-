@@ -1,12 +1,11 @@
+export const runtime = "edge";
 import { auth } from "@clerk/nextjs/server";
 import { isValidMessageList, sseResponse } from "@/lib/api";
 import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { buildAdaptiveLiveOCRPrompt, LIVE_OCR_SYSTEM_PROMPT } from "@/lib/prompts/live-ocr";
-import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
+import { buildSendImagePrompt } from "@/lib/prompts/send-image";
 import { buildVoiceAgentPrompt } from "@/lib/prompts/voice-agent";
 import { checkRateLimit } from "@/lib/rate-limit";
-
-export const runtime = 'edge';
 
 import type { AppMode, ImageInput, Message } from "@/types";
 import type { ExamType } from "@/types/exam";
@@ -171,7 +170,9 @@ export async function POST(request: Request): Promise<Response> {
     systemPrompt = LIVE_OCR_SYSTEM_PROMPT;
     maxTokens = 4096;
   } else {
-    systemPrompt = SEND_IMAGE_SYSTEM_PROMPT;
+    // send_image mode — use exam-specific prompt when available
+    const exam = resolveExam(payload.exam);
+    systemPrompt = buildSendImagePrompt(exam ?? "JEE");
     maxTokens = 4096;
   }
 

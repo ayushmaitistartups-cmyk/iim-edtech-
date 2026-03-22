@@ -54,6 +54,22 @@ const config: Config = {
           soft: "hsl(0, 50%, 95%)"
         },
 
+        // Strengths & Growth — emerald/cyan
+        strength: {
+          DEFAULT: "hsl(160, 84%, 39%)", // Premium Emerald
+          glow: "hsla(160, 84%, 39%, 0.2)",
+          surface: "hsla(160, 84%, 39%, 0.05)",
+          cyan: "hsl(190, 90%, 50%)" 
+        },
+
+        // Weaknesses & Focus — rose/amber
+        weakness: {
+          DEFAULT: "hsl(348, 83%, 47%)", // Premium Rose
+          glow: "hsla(348, 83%, 47%, 0.2)",
+          surface: "hsla(348, 83%, 47%, 0.05)",
+          amber: "hsl(38, 92%, 50%)"
+        },
+
         // Borders — warm neutrals
         edge: {
           DEFAULT: "hsl(32, 12%, 84%)",

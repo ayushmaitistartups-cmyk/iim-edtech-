@@ -51,7 +51,8 @@ Rules:
 - No long explanations. No paragraphs. No "Here's how..." intros.
 - ALWAYS write math using LaTeX: inline $...$ and display $$...$$.
 - If OCR text is noisy, ask: "Hold page steadier."
-- VISION RULE: Test papers often have multi-column layouts. Focus ONLY on the question the student is working on. IGNORE text, values, or options from adjacent columns. Do not combine content across physical gaps in the page.`.trim();
+- CRITICAL QUESTIONING RULE: If you are providing a direct correction or stating a known value, DO NOT ask a redundant question about the value you just provided. Only ask a question if it naturally leads the student to the next logical step. You can end with a direct instruction (e.g., 'Substitute this into the equation') instead of a question.
+- CRITICAL VISION RULE: Test papers often use multi-column layouts. Identify the specific question the student is pointing to or asking about, and STRICTLY IGNORE text, values, or options that bleed over from adjacent columns. Do not combine sentences or math values across physical gaps in the page.`.trim();
 
 export function buildAdaptiveLiveOCRPrompt(exam: ExamType, ctx: HintContext): string {
   const config = EXAM_CONFIG[exam];

@@ -9,7 +9,8 @@ import {
   Stethoscope,
   Scale,
   Atom,
-  ArrowRight,
+  Camera,
+  ImageUp,
   Clock,
   Target,
   TrendingUp,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { AppHeader } from "@/components/AppHeader";
 import { EXAM_CONFIG, type ExamType } from "@/types/exam";
+import { saveExam } from "@/lib/utils/exam-persist";
 import {
   TiltCard,
   StaggeredList,
@@ -228,13 +230,15 @@ export default function ExamSelectPage(): JSX.Element {
 
   const handleSelectExam = (exam: ExamType) => {
     setSelectedExam(exam);
+    saveExam(exam);
   };
 
-  const handleStartStudying = () => {
-    if (selectedExam) {
-      const queryParam = new URLSearchParams({ exam: selectedExam });
-      router.push(`/live-ocr?${queryParam.toString()}`);
-    }
+  const handleLiveLens = () => {
+    if (selectedExam) router.push(`/live-ocr?exam=${encodeURIComponent(selectedExam)}`);
+  };
+
+  const handleAsyncSolve = () => {
+    if (selectedExam) router.push(`/send-image?exam=${encodeURIComponent(selectedExam)}`);
   };
 
   return (
@@ -327,21 +331,33 @@ export default function ExamSelectPage(): JSX.Element {
             exit={{ y: 100, opacity: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
           >
-            <div className="max-w-container mx-auto flex items-center justify-between gap-4">
+            <div className="max-w-container mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <p className="text-caption text-ink-muted">Selected exam</p>
                 <p className="text-title font-semibold">
                   {EXAM_CONFIG[selectedExam].label}
                 </p>
               </div>
-              <PressableButton
-                variant="primary"
-                size="lg"
-                onClick={handleStartStudying}
-              >
-                Start Studying
-                <ArrowRight className="w-4 h-4 ml-2" />
-              </PressableButton>
+              <div className="flex items-center gap-3 w-full sm:w-auto">
+                <PressableButton
+                  variant="secondary"
+                  size="md"
+                  onClick={handleAsyncSolve}
+                  className="flex-1 sm:flex-none"
+                >
+                  <ImageUp className="w-4 h-4 mr-2" />
+                  Async Solve
+                </PressableButton>
+                <PressableButton
+                  variant="primary"
+                  size="md"
+                  onClick={handleLiveLens}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Camera className="w-4 h-4 mr-2" />
+                  Live Lens
+                </PressableButton>
+              </div>
             </div>
           </motion.div>
         )}

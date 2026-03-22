@@ -3,9 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { consumeSSE } from "@/lib/sse-client";
 import type { AppMode, ImageInput, Message } from "@/types";
+import type { ExamType } from "@/types/exam";
 
 interface SendUserMessageOptions {
   mode: AppMode;
+  exam?: ExamType;
   ocrText?: string;
   image?: ImageInput;
 }
@@ -94,6 +96,7 @@ export function useChat(initialMessages: Message[] = []): UseChatResult {
         body: JSON.stringify({
           messages: nextMessages,
           mode: options.mode,
+          exam: options.exam,
           ocrText: options.ocrText,
           image: options.image
         })

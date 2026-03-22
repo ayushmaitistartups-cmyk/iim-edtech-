@@ -1,5 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
-import { SEND_IMAGE_SYSTEM_PROMPT } from "@/lib/prompts/send-image";
+import { buildSendImagePrompt } from "@/lib/prompts/send-image";
+import { resolveExamParam } from "@/lib/utils/exam";
 import { sseResponse } from "@/lib/api";
 import { ConfigurationError, QuotaExhaustedError, RateLimitedError, streamChat } from "@/lib/gemini";
 import { uploadTemporaryImage } from "@/lib/supabase";
@@ -60,21 +61,23 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "File size must be under 10MB." }, { status: 400 });
   }
 
+  const examRaw = formData.get("exam");
+  const exam = resolveExamParam(typeof examRaw === "string" ? examRaw : undefined);
+  const systemPrompt = buildSendImagePrompt(exam);
+
   const buffer = await file.arrayBuffer();
   const base64 = toBase64(buffer);
   const image = { base64, mimeType: file.type };
 
   // Best-effort temporary upload for prototype traceability.
-  console.log("Saving image...");
   await uploadTemporaryImage(base64, file.type, userId);
-  console.log("Image saved!");
 
   const messages: Message[] = [
     {
       id: "",
       role: "user",
-      content: "Solve this step by step.",
-      createdAt: 0
+      content: "Please analyse this problem.",
+      createdAt: Date.now()
     }
   ];
 
@@ -94,7 +97,7 @@ export async function POST(request: Request): Promise<Response> {
     }, MAX_STREAM_DURATION_MS);
 
     try {
-      for await (const token of streamChat(messages, SEND_IMAGE_SYSTEM_PROMPT, image, 4096, abortController.signal)) {
+      for await (const token of streamChat(messages, systemPrompt, image, 4096, abortController.signal)) {
         if (timedOut) break;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(token)}\n\n`));
       }

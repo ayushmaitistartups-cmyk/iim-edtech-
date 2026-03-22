@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(gh pr:*)",
+      "Bash(npx tsc:*)",
+      "Bash(grep -r \"framer-motion\\\\|motion\\\\|whileHover\\\\|whileTap\" 'd:\\\\IIM EDTECH/components' 'd:\\\\IIM EDTECH/app' --include=*.tsx --include=*.ts)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script",
+      "Bash(ls -la \"D:/IIM EDTECH/app/\\(app\\)/\")",
+      "Bash(find:*)",
+      "Bash(git:*)",
+      "Bash(grep -r dashboard 'D:/IIM EDTECH/components' --include=*.tsx)",
+      "Bash(grep -r \"sessionId\\\\|session-id\" 'D:/IIM EDTECH/app' --include=*.tsx)",
+      "Bash(ls:*)"
+    ]
+  }
+}

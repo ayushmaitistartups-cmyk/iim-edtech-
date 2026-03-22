@@ -52,7 +52,7 @@ function NavHeader(): JSX.Element {
             <span className="text-title font-semibold">ClarityAI</span>
           </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <SignedOut>
               <SignInButton mode="modal">
                 <PressableButton variant="ghost" size="sm">
@@ -66,7 +66,7 @@ function NavHeader(): JSX.Element {
               </Link>
             </SignedOut>
             <SignedIn>
-              <Link href="/exam-select">
+              <Link href="/dashboard">
                 <PressableButton variant="secondary" size="sm">
                   Dashboard
                 </PressableButton>
@@ -90,20 +90,24 @@ function HeroSection(): JSX.Element {
   return (
     <div ref={ref}>
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
-      {/* Subtle grid background */}
+      {/* Grid background */}
       <div
-        className="absolute inset-0 opacity-30"
+        className="absolute inset-0 opacity-40"
         style={{
           backgroundImage: `
             linear-gradient(to right, hsl(32, 12%, 84%) 1px, transparent 1px),
             linear-gradient(to bottom, hsl(32, 12%, 84%) 1px, transparent 1px)
           `,
-          backgroundSize: "64px 64px"
+          backgroundSize: "56px 56px"
         }}
       />
 
+      {/* Gradient mesh blobs */}
+      <div className="absolute top-[-15%] left-[-5%] w-[55vw] h-[55vh] bg-accent-glow rounded-full blur-[140px] opacity-50 pointer-events-none" />
+      <div className="absolute bottom-[10%] right-[-10%] w-[40vw] h-[40vh] bg-strength-glow rounded-full blur-[120px] opacity-30 pointer-events-none" />
+
       {/* Gradient overlay */}
-      <div className="absolute inset-0 bg-gradient-to-b from-surface via-transparent to-surface" />
+      <div className="absolute inset-0 bg-gradient-to-b from-surface/60 via-transparent to-surface" />
 
       <motion.div
         className="relative z-10 max-w-content mx-auto px-6 text-center"
@@ -116,23 +120,25 @@ function HeroSection(): JSX.Element {
         }}
       >
         <FadeInView delay={0.1}>
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-accent-soft border border-accent/20 mb-8">
-            <Zap className="w-4 h-4 text-accent" />
-            <span className="text-caption font-medium text-accent">AI-Powered Learning</span>
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-accent-soft border border-accent/20 mb-8 shadow-soft">
+            <Zap className="w-3.5 h-3.5 text-accent" />
+            <span className="text-caption font-semibold text-accent tracking-wide">For JEE · NEET · CAT · UPSC · GMAT</span>
           </div>
         </FadeInView>
 
         <FadeInView delay={0.2}>
-          <h1 className="text-display mb-6 max-w-4xl mx-auto">
-            Master Any Subject with{" "}
-            <span className="text-accent">Intelligent</span> Guidance
+          <h1 className="text-display mb-6 max-w-3xl mx-auto">
+            Your 24/7{" "}
+            <span className="relative inline-block">
+              <span className="text-accent">Socratic</span>
+            </span>
+            {" "}AI Tutor
           </h1>
         </FadeInView>
 
         <FadeInView delay={0.3}>
-          <p className="text-body text-ink-muted max-w-2xl mx-auto mb-10 leading-relaxed">
-            ClarityAI transforms complex academic challenges into clear, step-by-step solutions.
-            From calculus to chemistry, get instant explanations tailored to your learning style.
+          <p className="text-body text-ink-muted max-w-xl mx-auto mb-10 leading-relaxed prose-academic">
+            Point your camera at any problem. Speak naturally. Clarity guides you to the answer — step by step, never giving it away.
           </p>
         </FadeInView>
 
@@ -154,7 +160,7 @@ function HeroSection(): JSX.Element {
 
         {/* Stats */}
         <FadeInView delay={0.6}>
-          <div className="mt-16 grid grid-cols-3 gap-8 max-w-lg mx-auto">
+          <div className="mt-16 grid grid-cols-3 gap-8 max-w-lg mx-auto border-t border-edge pt-12">
             {[
               { value: "10K+", label: "Students" },
               { value: "98%", label: "Accuracy" },
@@ -162,7 +168,7 @@ function HeroSection(): JSX.Element {
             ].map((stat) => (
               <div key={stat.label} className="text-center">
                 <div className="text-headline font-bold text-accent">{stat.value}</div>
-                <div className="text-caption text-ink-subtle">{stat.label}</div>
+                <div className="text-caption text-ink-subtle uppercase tracking-widest font-semibold">{stat.label}</div>
               </div>
             ))}
           </div>
@@ -180,31 +186,35 @@ function HeroSection(): JSX.Element {
 const features = [
   {
     icon: Camera,
-    title: "Live OCR + Voice",
-    description: "Point your camera at any problem. Speak naturally while Clarity analyzes and understands the visual content in real-time.",
+    title: "Live Lens",
+    description: "Point your camera at any equation or diagram. Ask questions out loud. Clarity tutors you in real-time — never revealing the answer, always guiding you to it.",
     href: "/live-ocr",
-    accent: "hsl(158, 48%, 38%)"
+    accent: "hsl(158, 48%, 38%)",
+    badge: "Most Used"
   },
   {
     icon: ImageIcon,
-    title: "Image Analysis",
-    description: "Upload a photo of any question—handwritten or printed—and receive comprehensive, step-by-step solutions instantly.",
+    title: "Async Solve",
+    description: "Upload a photo of any question — handwritten or printed — and get a deep, structured breakdown of the solution path.",
     href: "/send-image",
-    accent: "hsl(222, 68%, 48%)"
-  },
-  {
-    icon: BookOpen,
-    title: "Exam Preparation",
-    description: "Access curated practice problems, past exam questions, and targeted revision materials for your specific curriculum.",
-    href: "/exam-select",
-    accent: "hsl(38, 85%, 52%)"
+    accent: "hsl(222, 68%, 48%)",
+    badge: null
   },
   {
     icon: Brain,
-    title: "Adaptive Learning",
-    description: "Our AI identifies knowledge gaps and adjusts explanations to match your understanding level perfectly.",
-    href: "/exam-select",
-    accent: "hsl(280, 60%, 48%)"
+    title: "Adaptive Hints",
+    description: "Clarity tracks how stuck you are and escalates hints progressively — from concept nudges to partial solutions — without ever handing you the answer.",
+    href: "/sign-up",
+    accent: "hsl(280, 60%, 48%)",
+    badge: null
+  },
+  {
+    icon: BookOpen,
+    title: "Multi-Exam Ready",
+    description: "Tailored prompts and difficulty calibration for JEE, NEET, CAT, GMAT, and UPSC. One tutor. All your exams.",
+    href: "/sign-up",
+    accent: "hsl(38, 85%, 52%)",
+    badge: null
   }
 ];
 
@@ -229,10 +239,18 @@ function FeaturesSection(): JSX.Element {
           {features.map((feature) => (
             <StaggeredItem key={feature.title}>
               <Link href={feature.href}>
-                <PressableCard className="h-full group">
+                <PressableCard className="h-full group relative overflow-hidden">
+                  {"badge" in feature && feature.badge && (
+                    <div
+                      className="absolute top-4 right-4 px-2.5 py-1 rounded-full text-caption font-semibold text-white"
+                      style={{ backgroundColor: feature.accent }}
+                    >
+                      {feature.badge}
+                    </div>
+                  )}
                   <div
                     className="w-12 h-12 rounded-lg flex items-center justify-center mb-4 transition-transform duration-smooth group-hover:scale-110"
-                    style={{ backgroundColor: `${feature.accent}15` }}
+                    style={{ backgroundColor: `${feature.accent}18` }}
                   >
                     <feature.icon
                       className="w-6 h-6"
@@ -266,18 +284,18 @@ function FeaturesSection(): JSX.Element {
 const steps = [
   {
     step: "01",
-    title: "Capture Your Question",
-    description: "Use your camera to scan any problem, or upload an image directly. Works with handwritten notes, textbooks, and worksheets."
+    title: "Point Your Camera",
+    description: "Aim at any problem — handwritten, textbook, or printed. Clarity's OCR reads it in real time, even in multi-column exam layouts."
   },
   {
     step: "02",
-    title: "AI Analysis",
-    description: "Our advanced AI instantly recognizes mathematical notation, diagrams, and text, understanding the context and requirements."
+    title: "Ask Out Loud",
+    description: "Speak naturally. Say 'I don't know where to start' or 'check my working'. Clarity detects your intent and responds accordingly."
   },
   {
     step: "03",
-    title: "Clear Explanation",
-    description: "Receive a detailed, step-by-step solution with clear reasoning. Ask follow-up questions to deepen your understanding."
+    title: "Get Guided, Not Spoiled",
+    description: "Clarity never gives away the answer. It points to the exact step where you went wrong and asks the one question you need to think through next."
   }
 ];
 
@@ -329,12 +347,12 @@ function HowItWorksSection(): JSX.Element {
 // ============================================
 
 const benefits = [
-  "Instant explanations for any subject",
-  "Works with handwritten or typed content",
-  "Step-by-step problem breakdown",
-  "Available 24/7 on any device",
-  "Supports multiple languages",
-  "Privacy-focused—your data stays yours"
+  "Strict Socratic method — never reveals final answers",
+  "Live camera + voice for hands-free tutoring",
+  "Adaptive hints that escalate with your struggle level",
+  "Covers JEE, NEET, CAT, GMAT, and UPSC",
+  "Multi-column exam layout detection",
+  "Available 24/7 — no scheduling, no waiting"
 ];
 
 function BenefitsSection(): JSX.Element {
@@ -369,13 +387,43 @@ function BenefitsSection(): JSX.Element {
           </FadeInView>
 
           <FadeInView direction="right">
-            <TiltCard className="p-8 bg-surface-raised">
-              <div className="aspect-video bg-surface-sunken rounded-lg flex items-center justify-center border border-edge-subtle">
-                <div className="text-center p-8">
-                  <Brain className="w-12 h-12 text-accent mx-auto mb-4" />
-                  <p className="text-caption text-ink-subtle">
-                    Interactive demo coming soon
-                  </p>
+            <TiltCard className="p-6 bg-surface-raised">
+              {/* Mock tutor session card */}
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-2 h-2 rounded-full bg-strength animate-pulse" />
+                  <span className="text-caption font-semibold text-ink-muted uppercase tracking-widest">Live Session — JEE Physics</span>
+                </div>
+                {/* Student question bubble */}
+                <div className="flex justify-end">
+                  <div className="bg-accent/10 border border-accent/20 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]">
+                    <p className="text-caption text-ink">A block of mass 2 kg is on a frictionless surface. F = 10 N. Find acceleration?</p>
+                  </div>
+                </div>
+                {/* AI response bubble */}
+                <div className="flex justify-start">
+                  <div className="bg-surface-sunken border border-edge rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%]">
+                    <p className="text-caption text-ink-muted mb-1 font-semibold">Clarity</p>
+                    <p className="text-caption text-ink font-mono">F = ma → a = F/m</p>
+                    <p className="text-caption text-ink mt-1">What values do you have for F and m?</p>
+                  </div>
+                </div>
+                {/* Student reply */}
+                <div className="flex justify-end">
+                  <div className="bg-accent/10 border border-accent/20 rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%]">
+                    <p className="text-caption text-ink">F = 10 N, m = 2 kg, so a = 5 m/s²</p>
+                  </div>
+                </div>
+                {/* Final AI */}
+                <div className="flex justify-start">
+                  <div className="bg-strength/5 border border-strength/20 rounded-2xl rounded-tl-sm px-4 py-3 max-w-[85%]">
+                    <p className="text-caption text-strength font-semibold">Correct. Next step?</p>
+                  </div>
+                </div>
+                {/* Typing indicator */}
+                <div className="flex justify-end items-center gap-1 mt-1 pr-1">
+                  <span className="text-[10px] text-ink-ghost">Student is typing</span>
+                  <motion.span animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1.2, repeat: Infinity }} className="w-1 h-1 rounded-full bg-ink-ghost inline-block" />
                 </div>
               </div>
             </TiltCard>
