@@ -1,62 +1,48 @@
-# Backend & Analytics Database Implementation Plan
-<!-- Living document detailing the transition from local Python middleware to a Supabase-backed analytics engine -->
+# LUMOS — Implementation plan
 
-After reviewing the current folder structure, the `backend/` Python middleware, and the `supabase/migrations/`, we have established a sophisticated foundation bridging hardware and web environments.
+The canonical phase-by-phase build order lives in
+[`changes/01_MASTER_PLAN.md`](changes/01_MASTER_PLAN.md). This file tracks the
+*current state* against that plan and the next concrete chunk of work.
 
-## 1. What We Already Have (Current State)
+## Where we are (2026-05-26)
 
-We have successfully unified the hardware and web workflows far beyond the initial prototype.
+- **Phase 0 — Foundation: Done.** Gateway, device JWT, binary frames, ESP32-S3 firmware, web-app deprecation, schema baseline.
+- **Phase 1 — Turn 1 core: not started.**
 
-### The Local Python Middleware (`backend/`)
-- **FastAPI Orchestrator (`main.py`):** We have consolidated the architecture into a single FastAPI app managing duplex WebSockets for both the client (`/ws/client`) and hardware (`/ws/hardware`). 
-- **OCR Debouncing:** We have successfully implemented the `Levenshtein` distance algorithm (firing every 5 frames) to trigger `page_turned` hardware events, preventing unnecessary API spam.
-- **Advanced Gemini Client (`gemini_client.py`):** This is highly advanced. We are already extracting real-time student state (`SessionState` with `mistakes_made` and `stuck_count`), using adaptive Socratic scaffolding prompts (Micro-Nudge vs Step Unlock), and enforcing a strict double-pass LLM guardrail.
+## Phase 1 — next up
 
-### The Database (`supabase/`)
-- **Persistent Chat:** The `001_create_chat_sessions.sql` migration sets up `chat_sessions` and `chat_messages` with strict Row Level Security (RLS).
+Targets the multimodal Turn 1 path so a paired lamp can answer one question.
 
----
+### Build order
 
-## 2. What Is Missing & Needs to Be Built
+1. **Redis client** — `lumos-backend/storage/redis_client.py` (Upstash REST or async `redis-py`); add `REDIS_URL` to env contract.
+2. **Cache manager** — `lumos-backend/providers/cache_manager.py` implementing Gemini context caching Layers 1 (global, 3600 s), 2 (student profile, 1800 s), 3 (MSM, 1800 s) per [`changes/02_WORKFLOW.md`](changes/02_WORKFLOW.md) §Turn 1.
+3. **Gemini client** — `lumos-backend/providers/llm_gemini.py` wrapping Gemini 2.5 Flash + escalation to Gemini 2.5 Pro on `is_confident < 0.60`.
+4. **Query classifier** — `lumos-backend/classifiers/query_classifier.py` (Gemini Flash, text-only, ~100 ms) emitting `{ type, difficulty, subject, exam_type, exam_track, needs_grounding }`.
+5. **MSM generator** — orchestrator step in `lumos-backend/orchestrator/turn_handler.py` that produces the Model Solution Memory and persists it to Redis (`model_answer:{session_id}:{q_hash}`).
+6. **Turn 1 nudge prompt** — `lumos-backend/prompts/turn1_system.py` with technical / conceptual modules toggled by `exam_track`.
+7. **Validator stub** — strip markdown + LaTeX-syntax check + voice/TFT length caps (full implementation in Phase 4).
+8. **Wire AUDIO_END → Turn 1** — replace the Phase 0 stub in [`lumos-backend/gateway/websocket.py`](../lumos-backend/gateway/websocket.py) `_complete_phase0_turn` with a call into `orchestrator.turn_handler`.
+9. **Postgres `turns` + `question_attempts` tables** — new migration `003_create_turns_and_attempts.sql`; writes are best-effort, off the hot path.
+10. **Tests** — classifier golden set, MSM cache hit/miss, escalation trigger, end-to-end Turn 1 latency budget assertion in CI.
 
-While `gemini_client.py` is dynamically extracting the student's `mistakes_made` and `stuck_count` in real-time, **we are currently discarding this data after the chat turn.** It is not being saved to Supabase, which means the frontend has no data to build an analytics dashboard.
+### Critical files to touch in Phase 1
 
-Additionally, to store images alongside chat messages for context, we need to integrate Supabase Storage.
+- New: `lumos-backend/providers/{cache_manager.py, llm_gemini.py}`, `lumos-backend/classifiers/query_classifier.py`, `lumos-backend/orchestrator/turn_handler.py`, `lumos-backend/orchestrator/validator.py`, `lumos-backend/prompts/{turn1_system.py, classifier.py, technical_module.py, conceptual_module.py}`, `lumos-backend/storage/redis_client.py`.
+- Edit: [`lumos-backend/gateway/websocket.py`](../lumos-backend/gateway/websocket.py) — swap stub for real orchestrator call.
+- Migration: `supabase/migrations/003_create_turns_and_attempts.sql`.
 
-### A. The Analytics Database Schema (Supabase)
-We need to create a new migration (`002_create_analytics_tables.sql`) to add tables. This schema will power advanced student insights:
-- **`topics` Table:** To store subjects and concepts hierarchically (e.g., Physics > Kinematics).
-- **`user_mastery` Table:** 
-  - To track the rolling 0-100 **proficiency score** for a student per subject.
-  - To track the **number of questions solved** per topic.
-  - To track **weak concepts** based on the proficiency score threshold dropping below a certain level.
-- **`user_time_tracking` Table:** To track exactly **how much time was spent on specific topics** during a session.
-- **`mistake_logs` Table:** 
-  - To store the specific `mistakes_made` extracted by Gemini.
-  - To aggregate the **overall mistakes made** and explicitly calculate **what type of mistakes are repeated the most** (e.g., Calculation Error vs. Formula Recall).
-- **UPDATE `chat_messages`:** Add an `image_url` column to link uploaded/captured images to specific chat turns.
+### External services to provision before Phase 1
 
-### B. Image Storage Strategy (Supabase Storage)
-To store the images efficiently:
-1. **Create a Bucket:** Create a Supabase Storage bucket named `chat_images`.
-2. **Python Upload:** When the Python backend (`main.py`) captures a significant frame (or receives an uploaded image), it uses the `supabase-py` client to upload the raw JPEG bytes to this bucket.
-3. **Link to Database:** Supabase Storage returns a public URL for the uploaded image. We insert this URL into the `image_url` column of the `chat_messages` table, so the frontend UI can fetch and display the exact image the student was looking at when they asked the question.
+| Service | Action |
+|---|---|
+| Redis | Spin up Upstash dev instance (or local Docker), put URL in `REDIS_URL`. |
+| Gemini | Obtain API key, set `GEMINI_API_KEY`. |
 
-### C. Bridging Python Middleware to Supabase
-We need to update `backend/main.py` and `backend/gemini_client.py`.
-- **Database Connection:** The Python backend needs to connect to Supabase (via the `supabase-py` SDK).
-- **Analytics & Image Ingestion:** In `process_chat_turn()`, the Python backend must asynchronously upload the frame to Supabase Storage, `INSERT` the chat message with the new `image_url`, and `INSERT` the extracted analytics (mistakes, time elapsed, questions solved) into the respective tables.
+Groq, Cartesia, and Cloudflare R2 are **not** needed until Phases 2, 3, and 5 respectively.
 
----
+## Acceptance — Phase 1 done
 
-## 3. Libraries & Algorithms to Use
-
-- **Database SDK:** `supabase-py` in the Python backend to push analytics and image bytes natively.
-- **Analytics Algorithms:** 
-  - **Rolling Weighted Average:** Implemented in PostgreSQL to calculate the `proficiency/mastery_score`. For example, if a student makes a "Conceptual Error", the mastery score for that specific topic drops by 5 points.
-  - **Mistake Frequency Analysis:** SQL `GROUP BY` and `COUNT` queries to instantly surface what mistake types are repeated the most over a given timeframe.
-  - **Session Timer Algorithm:** The Python middleware will track the Delta Time between the first question on a topic and moving to the next, logging the exact time spent per topic to the database.
-- **Frontend Charting:** `recharts` for the Next.js React dashboard.
-
-## 4. Pending Decisions
-- **Data Flow Decision:** Should the Python backend push the analytics directly to Supabase via the Python SDK, OR should it send the analytics payload over the WebSocket back to the Next.js client, and have Next.js write it to the database? *(Direct to Supabase is currently favored for speed and reliability, pending injection of the Supabase Service Role Key).*
+- A paired lamp emits `AUDIO_END` after a stub audio capture and receives a Gemini-generated Socratic nudge based on its captured image, within <1.8 s wall-clock.
+- MSM cache hit on a repeated question lowers Turn 1 latency by ≥30 %.
+- Escalation to Gemini Pro fires when `is_confident < 0.60` and the test suite proves it.

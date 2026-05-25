@@ -4,10 +4,24 @@ import { SignUp } from "@clerk/nextjs";
 import Link from "next/link";
 import { Sparkles } from "lucide-react";
 
-export default async function SignUpPage(): Promise<JSX.Element> {
+function safeRedirectUrl(value: string | undefined): string {
+  if (!value || !value.startsWith("/") || value.startsWith("//")) {
+    return "/devices";
+  }
+  return value;
+}
+
+interface SignUpPageProps {
+  searchParams: {
+    redirect_url?: string;
+  };
+}
+
+export default async function SignUpPage({ searchParams }: SignUpPageProps): Promise<JSX.Element> {
+  const redirectUrl = safeRedirectUrl(searchParams.redirect_url);
   const { userId } = await auth();
   if (userId) {
-    redirect("/dashboard");
+    redirect(redirectUrl);
   }
 
   return (
@@ -32,20 +46,20 @@ export default async function SignUpPage(): Promise<JSX.Element> {
         <div className="w-9 h-9 rounded-lg bg-accent flex items-center justify-center shadow-lifted group-hover:scale-105 transition-transform">
           <Sparkles className="w-5 h-5 text-white" />
         </div>
-        <span className="text-title font-semibold group-hover:text-accent transition-colors">ClarityAI</span>
+        <span className="text-title font-semibold group-hover:text-accent transition-colors">LUMOS</span>
       </Link>
 
       {/* Clerk widget */}
       <div className="relative z-10 w-full max-w-md">
         <SignUp
           path="/sign-up"
-          signInUrl="/sign-in"
-          afterSignUpUrl="/onboarding"
+          signInUrl={`/sign-in?redirect_url=${encodeURIComponent(redirectUrl)}`}
+          afterSignUpUrl={redirectUrl}
         />
       </div>
 
       <p className="relative z-10 mt-6 text-center text-caption text-ink-muted max-w-sm">
-        Uploaded images are stored temporarily for prototype testing and deleted within 24 hours.
+        Create an account to pair and manage your tutor lamps.
       </p>
     </main>
   );

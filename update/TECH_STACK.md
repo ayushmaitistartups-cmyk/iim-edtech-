@@ -1,112 +1,67 @@
-# Technology Stack
+# LUMOS — Tech stack
 
-> **Scope Legend**
-> - 🟢 **Prototype** — Used now
-> - 🟡 **Launch** — Upgrade to this before public release
-> - 🔴 **Later** — Post-launch consideration
+Phase 0 is intentionally a thin stack. Phases 1–6 add Redis, Groq, Cartesia,
+pgvector, and Cloudflare R2 — see [`changes/05_DECISIONS_AND_COST.md`](changes/05_DECISIONS_AND_COST.md)
+for the target list and rationale.
 
----
+## Currently installed
 
-## 1. Frontend — App & Processing Hub
+### Web app ([`package.json`](../package.json))
 
-| Layer | Technology | Notes |
-|---|---|---|
-| Framework | Next.js 14+ (App Router) | |
-| Language | TypeScript (strict mode) | No `any` types |
-| Styling | Tailwind CSS | Core utility classes only |
-| Animations | Framer Motion | Listening / Thinking / Speaking state indicators |
-| Deployment | Vercel (Hobby — free) | |
+- Next.js 14 (App Router) + React 18 + TypeScript (strict).
+- Tailwind CSS 3.
+- `@clerk/nextjs` for user auth.
+- `@supabase/supabase-js` (server-only, for the Clerk → Supabase user sync webhook).
+- `lucide-react` for icons.
+- `svix` to verify Clerk webhook signatures.
 
----
+### Gateway ([`lumos-backend/requirements.txt`](../lumos-backend/requirements.txt))
 
-## 2. Voice Pipeline
+- Python 3.11+
+- FastAPI 0.110 (works on 0.135 too — pin is conservative).
+- Uvicorn (ASGI).
+- `websockets`, `pydantic`, `python-dotenv`.
+- `httpx`, `pytest`, `pytest-asyncio` for tests.
 
-### 🟢 Prototype — Browser Native (Zero Setup, Zero Cost)
+### Firmware ([`firmware/tutor_lamp/`](../firmware/tutor_lamp/))
 
-| Function | Technology | How to Use |
-|---|---|---|
-| Speech-to-Text | `Web Speech API` | `new SpeechRecognition()` — built into Chrome/Edge |
-| Text-to-Speech | `Web SpeechSynthesis API` | `window.speechSynthesis.speak()` — built into all browsers |
-| Interrupt / Cancel | UI Stop button | `speechSynthesis.cancel()` + `AbortController.abort()` |
+- Arduino ESP32 core, target board `esp32:esp32:esp32s3`.
+- `WebSockets` (Links2004 / arduinoWebSockets).
+- `ArduinoJson` (^7.0).
+- `Preferences` (bundled NVS wrapper).
 
-> ⚠️ Web Speech API requires internet (sends audio to Google's servers). Works fine for prototype. Switch to WASM at launch for offline + Hinglish support.
+### Database
 
----
+- Supabase Postgres with `pgvector` extension enabled.
+- Tables in use today: `users`, `devices`, `pairing_codes`. Tables ready for Phase 5: `topics`, `user_mastery`, `user_time_tracking`, `mistake_logs`.
 
-### 🟡 Launch — Edge WASM (Offline, Private, Hinglish-Ready)
+## Coming in later phases
 
-| Function | Technology | Notes |
-|---|---|---|
-| Wake-word Detection | `vosk-browser` (WASM) | Runs in Web Worker, always-on "Hey Tutor" |
-| Speech-to-Text | `@xenova/transformers` + `whisper-base` | Full Hinglish support, runs via WebGPU/WASM |
-| Text-to-Speech | Piper TTS (WASM) | Warm, natural "elder sibling" voice, <200ms latency |
-| Interrupt Handler | `AbortController` | Tied to Vosk voice trigger — fires synchronously |
-
-> Model weights (~40–150MB) are fetched from HuggingFace/S3 CDN on first load and cached in browser IndexedDB. Never committed to Git.
-
----
-
-## 3. AI — Vision & Reasoning
-
-| Layer | Technology | Notes |
-|---|---|---|
-| Model | `gemini-2.0-flash` | Free on AI Studio, multimodal, handles complex STEM diagrams |
-| Client | `@google/generative-ai` SDK | |
-| API file | `lib/gemini.ts` | Centralized client, streaming enabled |
-| Conversation | `messages[]` array passed every request | Full multi-turn context, never single-shot prompts |
-
-> ❌ "Gemini 3" does not exist. Always use `gemini-2.0-flash` as the model string.
-
----
-
-## 4. Backend
-
-| Layer | Technology | Notes |
-|---|---|---|
-| API Routes | Next.js Serverless Edge Functions | `/api/chat`, `/api/ocr`, `/api/image` |
-| Auth | Clerk (free tier — 10K MAU) | Webhook for user sync to Supabase |
-| Database | Supabase PostgreSQL | `users` table for prototype |
-| Vector DB (RAG) | Supabase `pgvector` extension | 🟡 Launch — for coaching material cache |
-| File Storage | Supabase Storage | Images deleted immediately after Gemini processes |
-
----
-
-## 5. API Routes Summary
-
-| Route | Method | Purpose |
-|---|---|---|
-| `/api/chat` | POST | Conversational Socratic tutor — accepts `messages[]` + optional image |
-| `/api/ocr` | POST | Extracts text from live camera frame via Gemini Vision |
-| `/api/image` | POST | Full solution for uploaded image (Send Image mode) |
-| `/api/webhooks/clerk` | POST | Syncs new Clerk user → Supabase `users` table |
-
----
-
-## 6. Environment Variables
-
-```bash
-# AI
-GEMINI_API_KEY=                          # aistudio.google.com → Get API Key
-
-# Auth — Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=       # dashboard.clerk.com → API Keys → Publishable key (pk_test_...)
-CLERK_SECRET_KEY=                        # dashboard.clerk.com → API Keys → Secret key (sk_test_...)
-CLERK_WEBHOOK_SECRET=                    # dashboard.clerk.com → Webhooks → Add Endpoint → Signing Secret (whsec_...)
-
-# Database — Supabase
-NEXT_PUBLIC_SUPABASE_URL=               # supabase.com → Project Settings → API → Project URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY=          # supabase.com → Project Settings → API → anon/public key
-SUPABASE_SERVICE_ROLE_KEY=              # supabase.com → Project Settings → API → service_role key (NEVER expose publicly)
-```
-
----
-
-## 7. Hardware (Lamp — Post-Prototype)
-
-| Component | Details |
+| Phase | Adds |
 |---|---|
-| Microcontroller | ESP32-S3 WROOM (handles camera + audio routing) |
-| Camera | 5MP OV5640 |
-| Connection to App | WebRTC or WebSocket — streams local video/audio to Next.js client |
+| 1 | Redis (Upstash or self-hosted) for MSM + attempt cache. Google `generativeai` SDK with context caching (Layer 1+2+3). |
+| 2 | Groq Python SDK for Llama 3.3 70B. |
+| 3 | Cartesia Sonic Python SDK for streaming TTS. |
+| 4 | Google Search grounding via Gemini grounding API. |
+| 5 | `pgvector` embeddings via `psycopg[binary]` / `sqlalchemy`. Cloudflare R2 via `boto3` (S3-compatible). |
+| 6 | OpenTelemetry instrumentation for TTFT / total_ms / cost_usd per turn. |
 
-> Prototype uses laptop webcam via `getUserMedia()`. ESP32 integration happens after student validation.
+## Environment variables
+
+| Var | Used by | Required at | Notes |
+|---|---|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Web | runtime | Clerk dashboard. |
+| `CLERK_SECRET_KEY` | Web | runtime | Clerk dashboard. |
+| `CLERK_WEBHOOK_SIGNING_SECRET` | Web | runtime | Used by `/api/webhooks/clerk`. |
+| `NEXT_PUBLIC_SUPABASE_URL` | Web | runtime | Supabase project URL. |
+| `SUPABASE_SERVICE_ROLE_KEY` | Web | server-only | Webhook user upsert. |
+| `NEXT_PUBLIC_BACKEND_URL` | Web | runtime | Gateway base URL (e.g. `http://localhost:8000`). |
+| `DEVICE_JWT_SECRET` | Gateway | runtime | HMAC secret for device JWT. Must override the dev fallback in prod. |
+| `FRONTEND_BASE_URL` | Gateway | runtime | Used to build pairing URLs returned to the lamp. |
+| `DEVICE_STORE_PATH` | Gateway | optional | Path to JSON registry file. Defaults to `lumos-backend/.device_store.json`. |
+| `TRUST_UNSIGNED_CLERK_JWT` | Gateway | dev only | Set to `0` in prod once Clerk JWT verification is wired in. |
+| `LUMOS_WIFI_SSID` / `LUMOS_WIFI_PASSWORD` / `LUMOS_BACKEND_HOST` | Firmware | build time | Pass via `arduino-cli` `--build-property` flags or edit [`config.h`](../firmware/tutor_lamp/config.h). |
+
+> **Note:** The repo's [`.env.example`](../.env.example) at the root is **stale** — it still lists v0.1 vars (`GEMINI_API_KEY` in the web app, `CLERK_WEBHOOK_SECRET` instead of `CLERK_WEBHOOK_SIGNING_SECRET`, `ADMIN_EMAILS` for a deleted admin route, and `DEVICE_STORE_PATH=backend/...`). Use the table above as the source of truth; the example file will be regenerated when Phase 1 lands.
+
+Phase 1+ adds: `GEMINI_API_KEY`, `GROQ_API_KEY`, `CARTESIA_API_KEY`, `REDIS_URL`, `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`.

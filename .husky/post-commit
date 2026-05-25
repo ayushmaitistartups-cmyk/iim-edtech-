@@ -1,0 +1,5 @@
+#!/bin/sh
+# v0.1 used this to sync docs to Notion. The script was removed in the
+# LUMOS v4 pivot; this hook is a no-op until a new post-commit
+# automation is wired up.
+exit 0

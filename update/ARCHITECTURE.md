@@ -1,94 +1,95 @@
-# System Architecture
+# LUMOS — Architecture
 
-> **Scope Legend**
-> - 🟢 **Prototype** — Current architecture (Software + Stateful Python Backend)
-> - 🟡 **Launch** — Upgrade path (Adding ESP32-CAM Hardware)
-
----
-
-## Overview — Hybrid Tiered System
+## High-level
 
 ```
-[Student's Laptop/Phone]          [Python FastAPI Backend]           [Supabase Cloud]
-        │                               │                                 │
-  Browser (Next.js)                Stateful Serverless               PostgreSQL + pgvector
-  ┌─────────────────┐              ┌──────────────────┐              ┌─────────────────┐
-  │ Web Speech API  │──── voice ──▶│ WebSocket Server │──── RAG ───▶│ Embeddings      │
-  │ SpeechSynthesis │              │                  │◀── hints ───│ (🟡 Launch)     │
-  │ useCamera hook  │── frames ───▶│ /ws/client/{id}  │              └─────────────────┘
-  │ messages[] state│              │                  │──── Gemini API ──▶ gemini-2.0-flash
-  └─────────────────┘              └──────────────────┘
-        │                                ▲
-  [🟡 Launch: ESP32 Lamp]                │
-  Streams video JPEG over ───────────────┘
-  local WebSocket to Python Backend
+┌────────────────────┐    pair (REST)     ┌──────────────────────────────┐
+│   Next.js web app  │ ──────────────────►│   lumos-backend (FastAPI)    │
+│  (Clerk auth UI    │                    │                              │
+│   + /pair/[code]   │                    │   gateway/pairing.py         │
+│   + /devices)      │                    │   gateway/websocket.py       │
+└─────────┬──────────┘                    │   gateway/auth.py            │
+          │ Clerk session                 │   gateway/session.py         │
+          │                               │   schemas/frames.py          │
+          ▼                               │   storage/devices.py         │
+┌──────────────────────┐                  └─────────────┬────────────────┘
+│  Clerk + Supabase    │                                │
+│  (users, devices,    │ ◄─────── upsert/delete user ───┤
+│   pairing_codes…)    │                                │
+└──────────────────────┘                                │
+                                                        │  /lamp/ws (binary frames,
+                                                        │   Bearer device_jwt)
+                                                        ▼
+                                            ┌──────────────────────┐
+                                            │  ESP32-S3 tutor lamp │
+                                            │  (firmware/tutor_lamp)│
+                                            └──────────────────────┘
 ```
 
----
+## Components (current — end of Phase 0)
 
-## 1. Architecture Components
+### Web app — [`app/`](../app/)
 
-### Frontend (Next.js)
-- **Camera/Input:** Browser webcam via `getUserMedia()` OR WebSocket feed from Python backend.
-- **Voice:** Browser `Web Speech API` — mic button triggers recording.
-- **WebSocket Client:** Connects to Python FastAPI backend (`/ws/client/{session_id}`) to stream UI updates, chat responses, and voice transcription tokens.
+- Next.js 14, Clerk auth, six routes: `/`, `/sign-in`, `/sign-up`, `/devices`, `/pair/[code]`, `/api/webhooks/clerk`.
+- Only job: let a user sign in and link / unlink / rename their lamps.
+- Uses `@/lib/useApi` to call the FastAPI gateway with a Clerk bearer.
 
-### Middleware Backend (Python FastAPI)
-- **Computer Vision Pipeline:** Processes incoming JPEG frames (warping, background subtraction, occlusion detection) using OpenCV.
-- **Image Compression:** Compresses processed frames into lightweight JPEGs (Quality 60) before API transmission to minimize latency.
-- **Gemini Client:** Maintains session context and streams AI multimodal requests to Gemini 2.0 Flash or Flash-Lite.
+### Gateway — [`lumos-backend/`](../lumos-backend/)
 
-### ESP32-CAM Hardware (🟡 Launch)
-- Connects to local Wi-Fi.
-- Streams compressed VGA JPEG frames to the Python backend via WebSockets.
-- Includes a physical "WAKE UP" button (Doubt Pin) to trigger backend processing without active polling.
+| Module | Responsibility |
+|---|---|
+| `gateway/auth.py` | Device JWT (HS256, `iss=lumos-auth`, `ver=1`), scrypt secret hashing, pairing code generator. |
+| `gateway/pairing.py` | REST endpoints for register / poll / complete / list / unlink / rename. |
+| `gateway/websocket.py` | `/lamp/ws` — binary-frame dispatch, 4401/4402 close codes, PING→PONG heartbeat, Phase 0 stub turn response on AUDIO_END / CANCEL. |
+| `gateway/session.py` | In-memory `SessionStore` keyed by device_id; one lamp = one session. |
+| `schemas/frames.py` | Frame codec (1-byte type, 3-byte BE length, payload). All 12 frame types from the LUMOS spec. |
+| `storage/devices.py` | JSON-backed registry. Phase 5 swaps for Postgres without changing the surface. |
 
----
+### Firmware — [`firmware/tutor_lamp/`](../firmware/tutor_lamp/)
 
-## 2. Conversational Flow
+- `tutor_lamp.ino` — boot, WiFi connect, pairing, ws_loop service.
+- `provisioning.h/.cpp` — NVS storage of device_id / device_secret / device_jwt, `ensure_paired()` flow.
+- `net_ws.h/.cpp` — WebSocket client with frame encode/decode, 10 s PING cadence, 2/4/8/16/30/30 s ± 25 % jitter backoff, fatal 4401/4402/4426 handling.
+- `config.h` — WiFi creds, backend host/port, pin map.
+
+### Database — [`supabase/migrations/`](../supabase/migrations/)
+
+- `001_create_chat_sessions.sql` — legacy v0.1 chat sessions / messages. Kept for FK targets in `002_…`; no new writes.
+- `002_create_lumos_analytics_and_devices.sql` — `users`, `devices`, `pairing_codes`, `topics` (with `exam_track`), `user_mastery`, `mistake_logs`, `user_time_tracking`; `pgvector` extension enabled.
+
+## What's deferred to later phases
+
+| Phase | Adds |
+|---|---|
+| 1 | Redis client, MSM cache, query classifier, Gemini 2.5 Flash, Layer 1+2+3 cache. |
+| 2 | Groq client, nudge logic (HINT/FULL/DIRECT), attempt counters. |
+| 3 | Cartesia streaming TTS, two-track formatter (`tft_formatter`, `latex_validator`, `voice_cleaner`), `track_router`. |
+| 4 | Confidence-gate validator, Google Search grounding for conceptual exams. |
+| 5 | Postgres `turns`/`question_attempts`/`memories`, Cloudflare R2 blob store, pgvector embeddings. |
+| 6 | Latency tuning: parallel image upload on wake, sentence-level TTS, prompt cache warmup. |
+
+See [`changes/04_BACKEND_IMPLEMENTATION.md`](changes/04_BACKEND_IMPLEMENTATION.md) for the target module map.
+
+## Data flow at end of Phase 0
 
 ```
-1. Student asks a question (Voice or Text) + Video Frame captured
-   └─→ Next.js sends data over WebSocket to FastAPI backend
+ESP32 boot → ensure_paired():
+  POST /api/device/register   { device_id, device_secret }
+    → { pairing_code, pairing_url, expires_at }
+  …user opens pairing_url, clicks "Link this lamp"…
+    POST /api/device/complete-pairing { pairing_code }   (Clerk-auth)
+      → device_jwt minted in pairing_codes row
+  POST /api/device/poll-pairing { device_id, device_secret, pairing_code }
+    → { device_jwt }
+  NVS save → reboot trust loop
 
-2. FastAPI Backend Process:
-   ├─→ Run Computer Vision pipeline (Background subtraction, CLAHE, Warping)
-   ├─→ Compress image to ~30KB JPEG
-   ├─→ Construct Gemini multimodal prompt with Socratic instructions
-   └─→ Call Gemini API
-
-3. Gemini gemini-2.0-flash streams response tokens
-   └─→ FastAPI relays tokens via WebSocket to Next.js
-   └─→ Next.js pushes text to UI and triggers Web Speech API
+ESP32 loop:
+  WSS /lamp/ws  Authorization: Bearer <device_jwt>
+    ← STATE(idle)
+    every 10 s →  PING
+                ← PONG
+    on smoke   →  AUDIO_END
+                ← STATE(thinking) → TFT_TEXT → AUDIO_OUT_END → STATE(idle)
 ```
 
----
-
-## 3. Communication Contracts
-
-### Next.js ↔ Python FastAPI (`ws://localhost:8000/ws/client/{session_id}`)
-- **Client to Server:** `{"type": "chat_message", "content": "What is this?"}`
-- **Server to Client:** `{"type": "chat_token", "content": "Look "}`
-
-### ESP32-CAM ↔ Python FastAPI (`ws://localhost:8000/ws/hardware/{session_id}`)
-- **Hardware to Server:** Raw Binary JPEG Frames, or `{"type": "hardware_trigger", "action": "button_pressed"}`
-
----
-
-## 4. Supabase Schema (Prototype)
-
-```sql
--- Users table (synced from Clerk via webhook)
-CREATE TABLE users (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  clerk_id    TEXT UNIQUE NOT NULL,
-  email       TEXT NOT NULL,
-  created_at  TIMESTAMPTZ DEFAULT now()
-);
-
--- Row Level Security
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can read own row"
-  ON users FOR SELECT
-  USING (clerk_id = auth.uid()::text);
-```
+LLM/TTS pipeline arrives in Phase 1+; Phase 0 ends here.

@@ -1,109 +1,41 @@
-# Feature Breakdown & Prioritization
+# LUMOS — Features
 
-> **Color coding**
-> - 🟢 **Prototype** — Build this now
-> - 🟡 **Launch** — Before public release
-> - 🔴 **Later** — Post-launch roadmap
+Status as of 2026-05-26 (end of Phase 0). Features that haven't shipped yet
+point to the LUMOS phase that will deliver them.
 
----
+## Shipped
 
-## 1. Vision Module — The "Eyes"
+### Pairing & device management
 
-- 🟢 Snapshot every few seconds (configurable timer — e.g., 10 sec)
-- 🟢 Snapshot on voice command ("take a photo", "look at this")
-- 🟢 User can choose: auto-timer mode vs. voice-command-only mode
-- 🟡 Mini blinker light on lamp when picture is taken *(privacy compliance)*
-- 🟡 Shadow removal + tilt/perspective correction so paper looks flat
-- 🔴 Auto-crop to only the incremental changed region of the page *(only if zero API cost, else not worth it)*
-- 🟢 Gemini `gemini-2.0-flash` natively reads complex STEM diagrams, physics free-body diagrams, messy math scribbles — no separate OCR API needed
+- Sign in / sign up via Clerk.
+- Lamp shows a 6-character code on first boot. Visit `/pair/<code>` while signed in, click "Link this lamp", and the lamp polls itself into a paired state.
+- `/devices` lists every lamp on the account; supports rename and unlink. Unlinking revokes the device JWT immediately — the next inbound frame from that lamp is closed with code 4402.
+- Pairing codes expire after 5 minutes; expired codes are GC'd on the next poll.
 
----
+### Persistent lamp connection
 
-## 2. Voice Module — The "Ears & Mouth"
+- ESP32-S3 firmware keeps one persistent WSS to `/lamp/ws` for the lifetime of a session.
+- Binary frame protocol (4-byte header + payload) with 12 frame types per [`changes/IMPLEMENTATION_WEBSOCKET.md`](changes/IMPLEMENTATION_WEBSOCKET.md).
+- 10 s heartbeat (`PING` → `PONG`).
+- Exponential backoff reconnect (2 / 4 / 8 / 16 / 30 / 30 s ± 25 % jitter); fatal stop on 4401 / 4402 / 4426.
+- Phase 0 stub turn: on `AUDIO_END`, the gateway answers with `STATE(thinking) → TFT_TEXT → AUDIO_OUT_END → STATE(idle)` so end-to-end transport can be exercised before LLM/TTS land.
 
-### Prototype (Browser Native)
+## Pending (per LUMOS phase)
 
-- 🟢 **STT:** `Web Speech API` — press mic button, speak, get transcript
-- 🟢 **TTS:** `SpeechSynthesis API` — AI response read aloud automatically
-- 🟢 **Interrupt:** Stop button halts TTS + cancels Gemini fetch instantly
-- 🟢 **Conversation memory:** Full `messages[]` history passed every turn
+| Feature | Phase |
+|---|---|
+| Wake-word listening ("hey lumos") on-device | 1 |
+| Image-on-wake capture, JPEG send | 1 |
+| Gemini 2.5 Flash MSM generation with 3-layer cache | 1 |
+| Query classifier (6-type taxonomy, exam_track routing) | 1 |
+| Groq Llama 3.3 70B Turn 2+ with HINT/FULL nudges | 2 |
+| Cartesia streaming TTS | 3 |
+| Two-track display: LaTeX-on-TFT (technical) vs text bullets (conceptual) | 3 |
+| Confidence-gated validator + Gemini Pro escalation | 4 |
+| Google Search grounding for current-affairs exams | 4 |
+| Persistent `turns` / `question_attempts` / `memories` with pgvector recall | 5 |
+| Cloudflare R2 blob storage for audio + JPEG history | 5 |
+| <1.5 s Turn 1 / <500 ms Turn 2+ latency | 6 |
 
-### Launch (WASM Edge)
-
-- 🟡 **Wake-word:** Always-on "Hey Tutor" detection via Vosk WASM (no button press needed)
-- 🟡 **STT upgrade:** `@xenova/transformers` + `whisper-base` — full Hinglish support
-- 🟡 **TTS upgrade:** Piper TTS WASM — warm, human-like "elder sibling" voice
-- 🟡 **Interrupt upgrade:** AbortController tied to Vosk voice trigger — fires on speech detection, not button press
-
-### Language Support
-
-- 🟢 English (Web Speech API covers this)
-- 🟡 Hinglish — Hindi + English code-mixing (Whisper multilingual WASM)
-- 🔴 Regional languages (Tamil, Telugu, Marathi, Bengali)
-
----
-
-## 3. Pedagogical Brain — The "Tutor"
-
-- 🟢 **Socratic Hinting:** Never gives the direct answer. Always asks a guiding question first.
-  - *"Did you miss the 'square' in that formula?"*
-  - *"What does the denominator represent in this fraction?"*
-- 🟢 **Multi-turn conversation:** Student and AI go back and forth. Context retained across full session.
-- 🟢 **Mistake Categorizer:** Silently identifies mistake type before responding:
-  - **Conceptual** — Didn't know the theory
-  - **Procedural** — Knew theory but messed up the steps
-  - **Calculation** — Simple arithmetic error ("silly mistake")
-  - **Reading** — Misread question, wrong units
-- 🟡 **Smart Delay:** Based on problem difficulty + student effort, system waits before offering hints (pushes student to think first)
-- 🟡 **Concept Explainer:** If student asks for conceptual clarity, AI explains the concept — but first asks the student to attempt an explanation
-- 🟡 **Redirect to app:** If visual explanation (graphs, diagrams) is needed, AI says *"Open the app for a visual on this"*
-- 🔴 **Customized explanations:** Based on student's aptitude level + personal interests (e.g., cricket analogies for physics problems)
-
----
-
-## 4. Analytics Engine — The "Coach"
-
-- 🟡 **Syllabus Tracker:** Shows how much of JEE/NEET syllabus is covered and truly "internalized" (measured by speed + accuracy, not just attempted)
-- 🔴 **Performance Prediction:** *"Based on today's speed, you are in the top 5% for this topic"*
-- 🔴 **Percentile Ranking:** Global data from all lamp users — *"You are currently in the 94th percentile for Organic Chemistry"*
-- 🔴 **Efficacy Score:** Proprietary metric — accuracy + speed improvement over a 30-day rolling window
-- 🔴 **Study Recommendations:** Identifies weak areas by mistake type, creates a custom study plan, provides personalized question bank
-- 🔴 **Revision Scheduler:** Flags topics the student is starting to forget. Triggers "5-minute recap" sessions (spaced repetition)
-- 🔴 **Flow Tracker:** Measures uninterrupted deep-work session lengths. Correlates with high-accuracy periods. Gamification: streaks, session counts
-- 🔴 **Burnout Detection:** Voice-based stress markers + timing/speed data → suggests recovery periods
-- 🔴 **Parental Dashboard:** Daily summary: *"Rohan studied 4 hours; excelled in Algebra but needs help in Geometry"*
-
----
-
-## 5. Content Integration
-
-- 🟡 **Coaching material RAG:** Pre-load standard JEE/NEET questions into pgvector. System checks this database first — cached Socratic hints returned at ~$0 instead of calling Gemini
-- 🟡 **Voice-triggered question lookup:** Student says chapter + question number → system fetches that question image directly
-- 🔴 **Mock test mode:** No voice/discussion during test. Auto-capture every 5 seconds. Auto-infer missing edge steps when student turns a page
-- 🔴 **Coaching institute integration:** Pre-feed material from specific institutes (Allen, Aakash, Unacademy, etc.)
-- 🔴 **Fine-tuned proprietary model:** Train a custom model on JEE/NEET data to reduce Gemini dependency entirely *(long-term)*
-
----
-
-## 6. Hardware — The Lamp
-
-> Prototype uses laptop webcam. Build lamp hardware only after prototype is validated.
-
-### 🟡 Launch Hardware (BOM: ₹1,500–₹2,000)
-
-| Component | Cost (INR) | Spec |
-|---|---|---|
-| ESP32-S3 WROOM Module | ₹350–₹450 | Bulk sourcing, not DevKit |
-| Camera Module | ₹300–₹350 | 5MP OV5640, custom ribbon cable |
-| Lamp Body & Flexible Neck | ₹450–₹550 | Plastic base + LED head |
-| LED PCB (High CRI) | ₹100–₹150 | For paper clarity and correct color rendering |
-| Battery + BMS | ₹180–₹220 | 2500–3000mAh 18650 cell + protection |
-| Audio — MEMS Mic + 2W Speaker | ₹120–₹160 | For hardware voice (Vosk wake-word) |
-| Main PCB + SMT Assembly | ₹150–₹200 | All components on one board |
-| **Total Factory Price** | **~₹1,650–₹2,080** | |
-
-### Hardware Connection to App
-
-- ESP32 connects to student's local Wi-Fi
-- Streams video frames + raw audio over **WebRTC or WebSocket** to Next.js frontend
-- Student's phone/laptop does all the AI processing — ESP32 is purely a "dumb terminal"
+See [`changes/01_MASTER_PLAN.md`](changes/01_MASTER_PLAN.md) for build order
+and [`changes/02_WORKFLOW.md`](changes/02_WORKFLOW.md) for the full pipeline.
