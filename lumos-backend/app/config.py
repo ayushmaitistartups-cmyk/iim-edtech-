@@ -29,6 +29,7 @@ class Settings:
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
     gemini_pro_model: str = os.getenv("GEMINI_PRO_MODEL", "gemini-2.5-pro")
+    groq_api_key: str | None = os.getenv("GROQ_API_KEY")
     cartesia_api_key: str | None = os.getenv("CARTESIA_API_KEY")
     cartesia_voice_id: str | None = os.getenv("CARTESIA_VOICE_ID")
 

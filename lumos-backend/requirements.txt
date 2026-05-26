@@ -14,6 +14,8 @@ python-dotenv>=1.0
 
 # LLM brain
 google-genai>=1.0
+groq>=0.9
+Levenshtein>=0.25
 
 # TTS (optional at install time; MockTTS kicks in if missing)
 cartesia>=1.0; python_version >= "3.10"

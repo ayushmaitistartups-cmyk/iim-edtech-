@@ -34,11 +34,16 @@ from ..providers.llm_gemini import LLMError, get_llm
 from ..providers.tts_cartesia import TTSError, get_tts
 from ..schemas import FALLBACK_REPLY, LlmReply
 from ..services import memory, persistence
-from ..services.classifier import classify_from_text
+from ..services.classifier import classify_turn
 from ..services.streaming_parser import SpeechSentenceStreamer
 from ..services.validator import validate
 from ..session import Session
 from ..storage import turns_repo, vector_memory
+from ..formatting.track_router import route_track
+from ..formatting.voice_cleaner import clean_voice
+from ..providers.llm_groq import get_groq_llm
+from ..services import bao
+from ..services import nudge_logic
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +52,7 @@ logger = logging.getLogger(__name__)
 _llm = get_llm()
 _llm_pro = None  # lazily constructed on first escalation
 _tts = get_tts()
+_groq_llm = get_groq_llm()
 
 
 def _get_pro_llm():
@@ -62,10 +68,11 @@ def _get_pro_llm():
 
 def reset_providers_for_testing() -> None:
     """Force a re-read of the env-driven providers (used by pytest fixtures)."""
-    global _llm, _llm_pro, _tts
+    global _llm, _llm_pro, _tts, _groq_llm
     _llm = get_llm()
     _llm_pro = None
     _tts = get_tts()
+    _groq_llm = get_groq_llm()
 
 
 async def _speak_and_stream(session: Session, text: str) -> None:
@@ -221,12 +228,31 @@ async def run_turn(session: Session, image_bytes: bytes, audio_pcm: bytes) -> No
     history = await memory.get_recent_turns(session.device_id)
     history_text = memory.render_history_for_prompt(history)
 
-    # ---- Phase 4: classifier + long-term recall + grounding gate -----
+    # ---- Phase 4: current-turn classifier + grounding gate -----------
     history_corpus = " ".join(t.speech for t in history)
-    classification = classify_from_text(history_corpus)
+    classification = await classify_turn(
+        image_bytes=image_bytes,
+        audio_pcm=audio_pcm,
+        history_text=history_text,
+    )
     enable_grounding = classification.needs_grounding
+    route_lines = [
+        "Current-turn routing:",
+        (
+            f"- exam_track={classification.exam_track}; exam_type={classification.exam_type}; "
+            f"subject={classification.subject}; query_type={classification.query_type}; "
+            f"difficulty={classification.difficulty}; needs_grounding={classification.needs_grounding}"
+        ),
+    ]
+    if classification.exam_track == "conceptual":
+        route_lines.append("- Display rule: use display.kind='text' only; no LaTeX.")
+    elif classification.exam_track == "technical":
+        route_lines.append("- Display rule: prefer display.kind='latex' for equations and formulas.")
+    route_hint = "\n".join(route_lines)
+    history_text = history_text + ("\n" if history_text else "") + route_hint
 
-    long_term = await vector_memory.recall(session.user_id, query=history_corpus or "current question")
+    recall_query = history_corpus or f"{classification.subject} {classification.query_type}"
+    long_term = await vector_memory.recall(session.user_id, query=recall_query or "current question")
     if long_term:
         history_text = (
             history_text
@@ -241,7 +267,18 @@ async def run_turn(session: Session, image_bytes: bytes, audio_pcm: bytes) -> No
         len(long_term),
     )
 
-    # ---- LLM call (Gemini Flash) --------------------------------------
+    # ---- BAO Framework: Turn 1 vs Turn 2+ -----------------------------
+    # 1. Transcribe the audio first (we need this to compare hash AND for Groq)
+    transcript = await _groq_llm.transcribe(audio_pcm)
+    logger.info("device=%s transcript: %s", session.device_id, transcript)
+    
+    # 2. Detect Question Hash & MSM
+    question_hash = await bao.detect_question_hash(session.device_id, transcript)
+    attempt_count = await bao.get_or_increment_attempt(session.device_id, question_hash)
+    msm_text = await bao.get_msm(session.device_id, question_hash)
+    
+    is_turn_1 = (msm_text is None)
+
     streaming_speak_task: asyncio.Task | None = None
     sentence_queue: "asyncio.Queue[str | None] | None" = None
     if settings.streaming_tts:
@@ -251,39 +288,93 @@ async def run_turn(session: Session, image_bytes: bytes, audio_pcm: bytes) -> No
             name=f"speak-streaming-{session.device_id}",
         )
 
-    try:
-        json_buf = await asyncio.wait_for(
-            _consume_llm_stream(
-                session,
-                image_bytes,
-                audio_pcm,
-                history_text,
-                enable_grounding=enable_grounding,
-                sentence_queue=sentence_queue,
-            ),
-            timeout=settings.llm_total_timeout_s + 1.0,
-        )
-    except asyncio.TimeoutError:
-        logger.error("device=%s LLM timeout", session.device_id)
-        reply = FALLBACK_REPLY
-    except LLMError as exc:
-        logger.error("device=%s LLM error: %s", session.device_id, exc)
-        reply = FALLBACK_REPLY
-    except asyncio.CancelledError:
-        await session.send_state(DeviceState.IDLE)
-        raise
-    else:
+    reply = FALLBACK_REPLY
+    if is_turn_1:
+        logger.info("device=%s BAO: Turn 1 (Gemini)", session.device_id)
         try:
+            json_buf = await asyncio.wait_for(
+                _consume_llm_stream(
+                    session,
+                    image_bytes,
+                    audio_pcm,
+                    history_text,
+                    enable_grounding=enable_grounding,
+                    sentence_queue=sentence_queue,
+                ),
+                timeout=settings.llm_total_timeout_s + 1.0,
+            )
             reply = LlmReply.model_validate_json(json_buf)
+            if reply.master_solution:
+                await bao.save_msm(session.device_id, question_hash, reply.master_solution)
+        except asyncio.TimeoutError:
+            logger.error("device=%s LLM timeout", session.device_id)
+        except LLMError as exc:
+            logger.error("device=%s LLM error: %s", session.device_id, exc)
+        except asyncio.CancelledError:
+            await session.send_state(DeviceState.IDLE)
+            raise
         except Exception as exc:
-            logger.error("device=%s LLM JSON parse failed (%s); buf=%r", session.device_id, exc, json_buf[:200])
-            reply = FALLBACK_REPLY
+            logger.error("device=%s LLM JSON parse failed (%s)", session.device_id, exc)
+    else:
+        logger.info("device=%s BAO: Turn 2+ (Groq) attempt=%d", session.device_id, attempt_count)
+        nudge_level = nudge_logic.determine_nudge_level(
+            attempt_count=attempt_count,
+            query_type=classification.query_type,
+            difficulty=classification.difficulty,
+            time_spent_s=0, # Need cross-turn time tracking for this
+            student_level="intermediate"
+        )
+        nudge_instruction = nudge_logic.get_nudge_instruction(nudge_level)
+        
+        try:
+            # We don't currently support streaming parse into the sentence_queue for Groq
+            # because we don't have a `_consume_groq_stream` yet, but let's just 
+            # consume it into a buffer and parse it for now.
+            buf_parts = []
+            started = time.monotonic()
+            parser = SpeechSentenceStreamer() if sentence_queue is not None else None
+            
+            async for delta in _groq_llm.stream(
+                history_text=history_text,
+                msm_text=msm_text,
+                nudge_instruction=nudge_instruction
+            ):
+                buf_parts.append(delta)
+                if parser is not None and sentence_queue is not None:
+                    for sentence in parser.feed(delta):
+                        await sentence_queue.put(sentence)
+            
+            if sentence_queue is not None:
+                await sentence_queue.put(None)
+                
+            json_buf = "".join(buf_parts)
+            reply = LlmReply.model_validate_json(json_buf)
+        except asyncio.TimeoutError:
+            logger.error("device=%s Groq timeout", session.device_id)
+            if sentence_queue: await sentence_queue.put(None)
+        except LLMError as exc:
+            logger.error("device=%s Groq error: %s", session.device_id, exc)
+            if sentence_queue: await sentence_queue.put(None)
+        except asyncio.CancelledError:
+            await session.send_state(DeviceState.IDLE)
+            raise
+        except Exception as exc:
+            logger.error("device=%s Groq parse failed (%s)", session.device_id, exc)
+            if sentence_queue: await sentence_queue.put(None)
 
     # ---- Phase 3: validator + escalation ------------------------------
-    validated = validate(reply)
+    is_fallback_reply = reply == FALLBACK_REPLY
+    validated = validate(reply, exam_track=classification.exam_track)
     reply = validated.reply
 
-    if validated.confidence_after < settings.confidence_escalate_below and reply is not FALLBACK_REPLY:
+    # Apply track routing rules
+    reply, route_issues = route_track(reply, classification.exam_track)
+    validated.issues.extend(route_issues)
+    
+    # Ensure speech is clean for non-streaming paths
+    reply.speech = clean_voice(reply.speech)
+
+    if validated.confidence_after < settings.confidence_escalate_below and not is_fallback_reply:
         logger.info(
             "device=%s escalating to %s (confidence=%.2f issues=%s)",
             session.device_id,
@@ -299,11 +390,12 @@ async def run_turn(session: Session, image_bytes: bytes, audio_pcm: bytes) -> No
                     audio_pcm,
                     history_text,
                     llm=_get_pro_llm(),
+                    enable_grounding=enable_grounding,
                 ),
                 timeout=settings.llm_total_timeout_s + 1.0,
             )
             pro_reply = LlmReply.model_validate_json(pro_buf)
-            reply = validate(pro_reply).reply
+            reply = validate(pro_reply, exam_track=classification.exam_track).reply
         except asyncio.CancelledError:
             await session.send_state(DeviceState.IDLE)
             raise

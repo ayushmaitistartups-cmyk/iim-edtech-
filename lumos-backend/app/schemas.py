@@ -26,6 +26,7 @@ class LlmReply(BaseModel):
     speech: str = Field(min_length=1, max_length=2000)
     display: Display
     is_confident: float = Field(default=1.0, ge=0.0, le=1.0)
+    master_solution: str | None = None
 
 
 FALLBACK_REPLY = LlmReply(

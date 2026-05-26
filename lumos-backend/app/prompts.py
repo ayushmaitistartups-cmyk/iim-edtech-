@@ -30,10 +30,13 @@ trailing text. The schema is:
       "kind":    "latex" | "text" | "none",
       "content": string         // empty when kind == "none"
     },
-    "is_confident": number      // your honest self-assessment in [0, 1].
+    "is_confident": number,     // your honest self-assessment in [0, 1].
                                 // 1.0 = fully confident. 0.85+ = confident.
                                 // 0.60-0.84 = some uncertainty (shipping anyway).
                                 // < 0.60 = the gateway will retry with a stronger model.
+    "master_solution": string   // OPTIONAL. If this is a new question, provide a complete 
+                                // step-by-step master solution model here. Do not include this 
+                                // field for follow-up turns.
   }
 
 Rules:

@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Iterable
 
+from ..formatting.voice_cleaner import clean_voice
+
 
 _SENTENCE_END_RE = re.compile(r"[.!?](?:\s|$)")
 SENTENCE_MIN_CHARS = 12        # avoid emitting "Hi." as its own TTS call
@@ -148,7 +150,9 @@ class SpeechSentenceStreamer:
                 end = match.end()
                 chunk = tail[:end].strip()
                 if chunk and len(chunk) >= SENTENCE_MIN_CHARS:
-                    emitted.append(chunk)
+                    cleaned_chunk = clean_voice(chunk)
+                    if cleaned_chunk:
+                        emitted.append(cleaned_chunk)
                     self.sentence_cursor += end
                     tail = self.speech_buffer[self.sentence_cursor:]
                     continue
@@ -159,9 +163,13 @@ class SpeechSentenceStreamer:
                 # Run-on: force a flush at the last space within the cap.
                 cutoff = tail.rfind(" ", 0, SENTENCE_FORCE_FLUSH_CHARS)
                 if cutoff <= 0:
-                    cutoff = SENTENCE_FORCE_FLUSH_CHARS
-                emitted.append(tail[:cutoff].strip())
-                self.sentence_cursor += cutoff
+                cutoff = SENTENCE_FORCE_FLUSH_CHARS
+            
+            chunk = tail[:cutoff].strip()
+            cleaned_chunk = clean_voice(chunk)
+            if cleaned_chunk:
+                emitted.append(cleaned_chunk)
+            self.sentence_cursor += cutoff
                 tail = self.speech_buffer[self.sentence_cursor:]
                 continue
 
@@ -170,7 +178,9 @@ class SpeechSentenceStreamer:
         if final:
             remaining = self.speech_buffer[self.sentence_cursor:].strip()
             if remaining:
-                emitted.append(remaining)
+                cleaned = clean_voice(remaining)
+                if cleaned:
+                    emitted.append(cleaned)
                 self.sentence_cursor = len(self.speech_buffer)
 
         return emitted
