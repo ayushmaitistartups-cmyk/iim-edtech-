@@ -57,7 +57,7 @@ The lamp **never** runs any user-facing UI logic (no LLM on device, no LaTeX ren
 | Wake word | "hey lumos" — local Edge Impulse model | The backend is contacted **only** after wake. You never see continuous audio. |
 | EOS detection | VAD-based: ≥ 2.5 s silence after ≥ 1 s speech, OR 30 s hard cap | A command audio clip arrives complete; you don't have to detect speech-end yourself. |
 | Camera | OV5640, JPEG output, ~640×480 typical, q=10–20 | JPEGs come pre-compressed. Just forward bytes to the LLM API. |
-| TFT | 240×320 px, RGB565 big-endian byte-swapped, BGR colour order | Pixel format you must emit. Already matches `Latex_engine_tft.py`'s output. |
+| TFT | Panel native 240×320; lamp uses **LANDSCAPE rotation** (320 W × 240 H). RGB565 big-endian byte-swapped, BGR colour order. | Render LaTeX at **W=320, H=240 landscape** (`DisplayConfig(orientation=LANDSCAPE)` is the default in `Latex_engine_tft.py`). Already matches the lamp's `tft_ui` rotation 3. |
 | Speaker | MAX98357A I2S TX, **24 kHz mono int16 LE** wire format (lamp expands to stereo internally for full volume on the DAC). Wired via `tutor_lamp/spk_i2s.{h,cpp}` — 32 KB DRAM ring + playback task on core 0 priority 2. | You ship TTS as **mono** at 24 kHz int16 LE. Cartesia/Kokoro `output_format=pcm_s16le sample_rate=24000`. The lamp duplicates L=R itself before the I2S write. |
 | RGB LED | WS2812B (single pixel), GPIO 48 | Backend can drive LED state via the `STATE` frame (one byte enum). |
 | Buttons | 5 buttons via ADC ladder on GPIO 2 (Up/Down/Left/Right/Select) — `tutor_lamp/buttons.{h,cpp}` wired | `CANCEL` (`0x04`) IS now sent if the user hits Select during MODE_COMMAND/MODE_SENDING. Treat it. |
@@ -141,14 +141,26 @@ All frames share the same outer header (per `IMPLEMENTATION_WEBSOCKET.md` §4.2)
 
 One application frame = one WebSocket **binary** message. All numerics big-endian unless explicitly noted.
 
-### 4.1 `0x01 IMAGE_JPEG` — wake-time camera snapshot
+### 4.1 `0x01 IMAGE_JPEG` (terminator) + `0x05 IMAGE_PART` (intermediate chunks)
+The lamp sends every image as a sequence of small WS messages — the
+ArduinoWebsockets library on the lamp can't safely transmit a single
+WS frame larger than ~4 KB (heap-fragmentation `bad_alloc` crashes
+the chip, see §6). So:
+
+```
+FRAME_IMAGE_PART × N   (each ≤ 1 KB payload)
+FRAME_IMAGE_JPEG × 1   (the final chunk — signals "image complete")
+```
+
 | Field | Value |
 |---|---|
-| Payload | Raw JPEG bytes. **Not** base64, no header, no MIME prefix. |
-| Typical size | 30–80 KB at q=10–15 |
-| Maximum size | Hard cap: 200 KB. Backend should reject larger with `STATE(error)` + drop. |
-| Frequency | **One per turn**, fired ~100 ms after wake-word detection, before audio. |
-| What to do | Stash in `session.current_turn.image_bytes`. Forward to the LLM as `mime_type="image/jpeg"`. |
+| `IMAGE_PART` payload | Raw JPEG bytes, ≤ 1 KB per chunk. Append to a per-session accumulator. |
+| `IMAGE_JPEG` payload | Raw JPEG bytes — the LAST chunk. Append to accumulator, then treat the accumulator as a complete JPEG. |
+| Typical total size | 20–40 KB at SVGA q=10 (see §10 "lamp camera default") |
+| Maximum total size | 200 KB hard cap recommended; lamp side won't send larger. |
+| Single-message case | If accumulator is empty when `IMAGE_JPEG` arrives, the lamp sent a tiny image that fit in one message — treat the payload directly as the complete JPEG. Backward-compatible. |
+| Frequency | **One image per turn**, ~25 PARTs + 1 JPEG terminator, fired ~100 ms after wake-word detection. |
+| What to do | Maintain `session.image_accum: bytearray`. On PART → `extend(payload)`. On JPEG → either append + flush if accum non-empty, or treat payload as complete if accum empty. Forward to LLM as `mime_type="image/jpeg"`. Reference impl: `dummy_backend.py:handler` (`F_IMAGE_PART` / `F_IMAGE_JPEG` branches). |
 
 ### 4.2 `0x02 AUDIO_CHUNK` — streaming command audio
 | Field | Value |
@@ -191,12 +203,13 @@ Same outer header format as §4. All numerics big-endian.
 | Field | Value |
 |---|---|
 | Payload | int16 **little-endian** PCM, **24 kHz mono**. |
-| Recommended chunk size | **~12 KB** per frame (~250 ms of audio). Smaller → too many WS messages, larger → speaker ring buffer pressure. |
-| Frequency | Stream as fast as your TTS provider emits, throttled to one chunk per ~250 ms wall-clock. |
-| Total per turn | Depends on response length. 10 s TTS = ~480 KB across ~40 chunks. |
-| Lamp's reaction | The WS RX path calls `spk::push_pcm()` which enqueues bytes into a **32 KB FreeRTOS ring buffer** (≈ 340 ms of audio at 24 kHz). A dedicated **playback task on core 0, priority 2** drains the ring, expands each mono int16 sample to **stereo** (`L = R = sample`) into a 2 KB DRAM buffer, and writes to **I2S_NUM_0 TX** via DMA. The mono→stereo expansion is what makes the MAX98357A play at full volume regardless of how SD is wired. |
+| **Recommended chunk size** | **4 KB per frame (= 2 048 samples = 85 ms of audio at 24 kHz mono)**. This is the EXACT one-chunk playback duration so backend pacing and speaker drain stay aligned. ≤ 4 KB also keeps each WS message under the lamp's heap-fragmentation cap (see §6). |
+| **Pacing (critical)** | **One chunk every ~85 ms wall-clock** (matches playback rate exactly). Earlier docs said "12 KB / 250 ms" — that's WRONG. Sending at 70 ms (old `dummy_backend.py` default) over-sent by 22% and overflowed the speaker ring after ~3 s of playback (`[spk] ring full — dropped`). Reference: `dummy_backend.py` `CHUNK_BYTES = 4096`, `CHUNK_INTERVAL_S = 0.085`. |
+| Frequency | ~12 chunks/sec, ~47 KB/sec wire load. |
+| Total per turn | 10 s TTS = ~480 KB across ~117 chunks. 3-min TTS = ~8.6 MB across ~2100 chunks. |
+| Lamp's reaction | The WS RX path calls `spk::push_pcm()` which enqueues bytes into a **64 KB FreeRTOS ring buffer** (≈ 680 ms of audio at 24 kHz — bumped from 32 KB to absorb bursts from concurrent chunked TFT_FRAME traffic). A dedicated **playback task on core 0, priority 2** drains the ring, expands each mono int16 sample to **stereo** (`L = R = sample`) into a 2 KB DRAM buffer, and writes to **I2S_NUM_0 TX** via DMA. The mono→stereo expansion is what makes the MAX98357A play at full volume regardless of how SD is wired. |
 | First chunk behaviour | **Half-duplex with the mic:** on the very first `AUDIO_OUT` chunk per turn, the playback task calls `mic::stop()` → uninstalls `I2S_NUM_0` (mic) → reinstalls it in TX mode at 24 kHz stereo → starts playing. Cold-start latency from first byte received to first audible sample is **~100 ms** (matches §7 budget). While playing, the mic is OFF and wake-word detection cannot fire — user must use the Select button to cancel (sends `FRAME_CANCEL`). |
-| Backpressure | If you ship faster than the lamp drains, `push_pcm` blocks the WS RX path for up to 20 ms then drops the chunk. WiFi-stack TCP buffering plus the 32 KB ring give comfortable headroom — pacing at ~250 ms / 12 KB is real-time and never drops. |
+| Backpressure | If you ship faster than the lamp drains, `push_pcm` blocks the WS RX path for up to 20 ms then drops the chunk (`[spk] ring full — dropped`). The 64 KB ring + WiFi-stack TCP buffer give ~1 s headroom — 85 ms / 4 KB pacing never drops. |
 
 ### 5.2 `0x11 AUDIO_OUT_END` — end of TTS
 | Field | Value |
@@ -206,8 +219,32 @@ Same outer header format as §4. All numerics big-endian.
 | Lamp's reaction | Sets the internal "end marked" flag. The playback task keeps draining the ring until it empties, then waits a 200 ms safety window for late chunks, then calls `release_i2s_tx()`: uninstalls TX, reinstalls `I2S_NUM_0` in RX mode at 16 kHz for the mic, restarts the capture task, resets `audio_post_process` + `wake::reset_debounce`. **Net mic-deaf gap after AUDIO_OUT_END: ~300–500 ms.** During that window the lamp will not hear "hey lumos". |
 | Why you MUST send it | Without `AUDIO_OUT_END` the lamp never releases I2S back to the mic. The lamp would stay locked with the LED on "speaking" forever and would not accept the next wake. |
 
-### 5.3 `0x20 TFT_FRAME` — pre-rendered display pixels
+### 5.3 `0x20 TFT_FRAME` (terminator) + `0x23 TFT_PART` (intermediate chunks)
 This is the LaTeX path. The lamp does not render LaTeX; you do.
+
+**Just like IMAGE_JPEG, TFT_FRAME payloads MUST be chunked.** A single screen
+of LaTeX is 153 KB, a 24-frame scroll animation is 3.6 MB — far above the
+lamp's ~4 KB-per-WS-message receive limit (see §6). The protocol mirrors
+IMAGE_JPEG:
+
+```
+FRAME_TFT_PART × N    (each ≤ 2 KB payload)
+FRAME_TFT_FRAME × 1   (final chunk — signals "frame complete")
+```
+
+The backend chunks the rendered `[u16 W][u16 H][u8 nFrames][u8 rsv][pixels]`
+payload into ≤ 2 KB pieces. The lamp accumulates them into a single 3 MB
+PSRAM buffer (shared with `tft_ui::s_latex` — both pointers reference the
+same allocation, so chunked receive writes directly into the cache with no
+extra copy). On the `FRAME_TFT_FRAME` terminator the lamp commits the
+buffer and transitions to `PAGE_SPEAKING_LATEX`.
+
+Single-message TFT_FRAME (payload ≤ 2 KB) still works — if the lamp's
+accumulator is empty when a TFT_FRAME arrives, it's treated as a complete
+one-shot frame. Backward-compatible.
+
+Reference implementation: `dummy_backend.py:_send_tft_frame_chunked()`.
+
 
 **Payload layout (inner):**
 ```
@@ -220,25 +257,25 @@ This is the LaTeX path. The lamp does not render LaTeX; you do.
 
 | Field | Value |
 |---|---|
-| W, H | Frame dimensions in pixels. Match the lamp's TFT: `W=240, H=320` (or `W=320, H=240` if landscape per `Latex_engine_tft.py` DisplayConfig). |
-| nFrames | `1` if the equation fits the screen; `>1` for wide equations the lamp will scroll-animate. |
+| W, H | Frame dimensions in pixels. Lamp is **landscape**: `W=320, H=240`. |
+| nFrames | `1` if the equation fits the screen; `>1` for wide equations the lamp will scroll-animate via buttons. |
 | rsv | Must be `0`. |
-| pixels | RGB565, **big-endian byte-swapped, BGR colour order** — exactly what `Latex_engine_tft.py` `_to_rgb565(..., "BGR")` produces. Don't byte-swap on the backend; the lamp's `tft_display::render_frame` calls `pushColors(swap=false)`. |
-| Total size | Single 240×320 frame = `6 + 240*320*2 = 153 606 bytes`. Multi-frame ≤ 8 frames. |
-| **Scrolling behaviour (NEW)** | **Multi-frame is no longer auto-animated.** The lamp now paints frame 0 only; the user navigates frames manually with the **◀ Left** and **▶ Right** buttons. The lamp shows a `1 / N` page indicator. Backend should still produce multi-frame payloads for wide equations exactly as before; the only change is on the lamp. |
-| **Vertical budget (NEW)** | The lamp now reserves the top 20 px for a status bar and the bottom 16 px for scroll hints. Server-rendered frames at full 240×320 will be clipped at the bottom. **Recommended:** render at **W=240, H=280** in `Latex_engine_tft.py` `DisplayConfig` so the whole equation is visible. Old 240×320 still works, just gets trimmed. |
+| pixels | RGB565, **big-endian byte-swapped, BGR colour order** — exactly what `Latex_engine_tft.py` `_to_rgb565(..., "BGR")` produces. Don't byte-swap on the backend; the lamp's `tft_ui::on_tft_frame` calls `pushColors(swap=false)`. |
+| Total size | Single 320×240 frame = `6 + 320*240*2 = 153 606 bytes`. Multi-frame ≤ 8 frames. |
+| **Scrolling behaviour** | **Multi-frame is no longer auto-animated.** The lamp paints frame 0; the user navigates with the **Left** (`< prev`) and **Right** (`next >`) buttons. A `1/N` page indicator sits at the bottom-right. |
+| **Vertical budget** | Lamp reserves the **top 20 px** for the status bar and the **bottom 18 px** for the hint strip. A frame at full `H=240` will have its bottom 18 px overlaid by the hint strip. **Recommended:** the LaTeX engine's `eq_max_height=0.2` already keeps equations ≈ 48 px tall and vertically centred — they fit comfortably. If you want zero overlap, render at `W=320, H=200`. |
 
 **How to build it from `Latex_engine_tft.py`:**
 
 ```python
-from Latex_engine_tft import LatexRenderer, DisplayConfig
+from Latex_engine_tft import LatexRenderer, DisplayConfig, Orientation
 import struct
 
-cfg      = DisplayConfig()                # 240×320 BGR, matches lamp
+cfg      = DisplayConfig(orientation=Orientation.LANDSCAPE)  # 320×240, matches lamp
 renderer = LatexRenderer(cfg)
 
 pixels   = renderer.render(latex_str)     # concatenated frames as bytes
-W, H     = cfg.render_w, cfg.render_h
+W, H     = cfg.render_w, cfg.render_h     # 320, 240
 n_frames = len(pixels) // (W * H * 2)
 inner    = struct.pack(">HHBB", W, H, n_frames, 0)
 payload  = inner + pixels
@@ -285,43 +322,88 @@ payload  = inner + pixels
 
 ### 5.7 Ordering you MUST follow for one turn
 
+The proven flow from `dummy_backend.py:_respond`:
+
 ```
 (receive AUDIO_END from lamp)
   │
-  ├─► send STATE(0x02 thinking)             ← optional, but lights the LED nicely
+  ├─► send STATE(0x02 thinking)             ← optional, but lights the LED
   │
   │   (LLM call running…)
   │
-  ├─► send STATE(0x03 speaking)             ← optional, just before audio starts
-  ├─► send AUDIO_OUT (chunk 1)
-  ├─► send AUDIO_OUT (chunk 2)
-  ├─► …
-  ├─► send AUDIO_OUT (last chunk)
+  ├─► send STATE(0x03 speaking)
   │
-  ├─► send TFT_FRAME or TFT_TEXT or TFT_CLEAR
-  │     (any time after STATE thinking — recommended AFTER first AUDIO_OUT
-  │      so the user hears the lamp talk before seeing the screen update)
+  ├─► send TFT_TEXT (small, ~one WS message) ← lamp page transitions
+  │                                            THINKING → SPEAKING_TEXT
+  │                                            IMMEDIATELY — kills the
+  │                                            "spinner during audio" gap
   │
-  ├─► send AUDIO_OUT_END                    ← required, signals end of speech
-  └─► send STATE(0x00 idle)                 ← required, returns LED to cyan
+  ├─► (render LaTeX synchronously, ~0.5 s, matplotlib)
+  │
+  ├─► await asyncio.gather(                 ← RUN IN PARALLEL — critical
+  │     stream_audio(pcm),                  ←   paced 85 ms / 4 KB chunks
+  │     send_tft_frame_chunked(payload)     ←   unpaced 2 KB chunks
+  │   )                                       Audio reaches speaker within
+  │                                           ~100 ms of EOS; LaTeX TFT_PARTs
+  │                                           interleave on the wire. When
+  │                                           the TFT_FRAME terminator lands,
+  │                                           lamp transitions to combined
+  │                                           SPEAKING_LATEX view (formula
+  │                                           on top, text card below).
+  │
+  ├─► send AUDIO_OUT_END                    ← REQUIRED, releases I2S to mic
+  └─► send STATE(0x00 idle)                 ← REQUIRED, returns LED to cyan
 ```
 
 A turn that emits no display still must end with `AUDIO_OUT_END` and `STATE(idle)`.
+
+**Anti-pattern:** sending TFT_FRAME chunked SEQUENTIALLY before audio
+(`await send_display(); await stream_audio()`). At ~2 MB chunked LaTeX
+that's 3–5 s of silent lamp before the user hears anything. Always
+`asyncio.gather()` the two streams.
 
 ---
 
 ## 6. Data format reference (the exact bytes on the wire)
 
-| Domain | Format | Endianness | Where used |
+| Frame type | Value | Direction | Notes |
 |---|---|---|---|
-| Outer frame header | `[u8 type][u24 length]` (4 bytes total) | length is **big-endian** | every WS message |
-| `AUDIO_CHUNK` PCM | int16, 16 kHz, mono | **little-endian** | lamp → backend |
-| `AUDIO_OUT` PCM | int16, 24 kHz, mono | **little-endian** | backend → lamp |
-| `IMAGE_JPEG` | raw JPEG file bytes | n/a | lamp → backend |
-| `TFT_FRAME` inner header | `[u16 W][u16 H][u8 nFrames][u8 rsv]` (6 bytes) | W, H **big-endian** | backend → lamp |
-| `TFT_FRAME` pixels | RGB565, **byte-swapped big-endian**, BGR colour order | per-pixel BE on the wire | backend → lamp |
-| `TFT_TEXT` | UTF-8 string | n/a | backend → lamp |
-| `STATE` | one byte enum | n/a | backend → lamp |
+| `IMAGE_JPEG` | `0x01` | lamp → backend | final chunk of an image (or whole image if small) |
+| `AUDIO_CHUNK` | `0x02` | lamp → backend | int16 LE 16 kHz mono, ~640 B |
+| `AUDIO_END` | `0x03` | lamp → backend | empty payload, fires LLM |
+| `CANCEL` | `0x04` | lamp → backend | empty payload, abort in-flight |
+| `IMAGE_PART` | `0x05` | lamp → backend | intermediate chunk of a chunked image (lamp accumulates) |
+| `AUDIO_OUT` | `0x10` | backend → lamp | int16 LE 24 kHz mono TTS, **4 KB / 85 ms paced** |
+| `AUDIO_OUT_END` | `0x11` | backend → lamp | empty, REQUIRED — releases I2S to mic |
+| `TFT_FRAME` | `0x20` | backend → lamp | final chunk of a TFT frame (commits LaTeX page) |
+| `TFT_TEXT` | `0x21` | backend → lamp | UTF-8 ≤ 200 B |
+| `TFT_CLEAR` | `0x22` | backend → lamp | empty |
+| `TFT_PART` | `0x23` | backend → lamp | intermediate chunk of a chunked TFT_FRAME, ≤ 2 KB |
+| `STATE` | `0x30` | backend → lamp | one byte enum |
+
+Format conventions:
+
+| Domain | Format | Endianness |
+|---|---|---|
+| Outer frame header | `[u8 type][u24 length]` (4 bytes total) | length is **big-endian** |
+| `AUDIO_CHUNK` PCM | int16, 16 kHz, mono | **little-endian** |
+| `AUDIO_OUT` PCM | int16, 24 kHz, mono | **little-endian** |
+| `IMAGE_JPEG` / `IMAGE_PART` | raw JPEG bytes (each chunk is a slice; reassemble in order) | n/a |
+| `TFT_FRAME` inner header | `[u16 W][u16 H][u8 nFrames][u8 rsv]` (6 bytes, sits at offset 0 of the reassembled buffer) | W, H **big-endian** |
+| `TFT_FRAME` pixels | RGB565, **byte-swapped big-endian**, BGR colour order | per-pixel BE on the wire |
+| `TFT_TEXT` | UTF-8 string | n/a |
+| `STATE` | one byte enum | n/a |
+
+**WS MAX FRAME SIZE — hard rule, both directions:** Each WebSocket
+message **must be ≤ ~4 KB**. The lamp's `ArduinoWebsockets` library
+allocates a contiguous DRAM `std::string` of `len` bytes on both
+`sendBinary()` and the `WebsocketsMessage` ctor — anything larger than
+the lamp's ~128 KB DRAM headroom (under WiFi+camera+I2S load, with
+fragmentation) throws `std::bad_alloc`, no `catch`, → `terminate()` →
+`abort()` → reboot. Reference: `BACKEND_DESIGN.md §4.6.1 "Wire format
+gotcha"`. The two CHUNKED protocols (`IMAGE_PART` and `TFT_PART`) exist
+solely to obey this limit. Future frame types > 4 KB MUST follow the
+same pattern.
 
 When in doubt: outer length is BE; audio PCM is LE (native ESP32); TFT pixels are BE-swapped per pixel (this is what TFT_eSPI expects with `swap=false`).
 
@@ -353,11 +435,11 @@ The lamp's firmware has some intentional quirks. The backend should not break th
 | ❌ Send `AUDIO_CHUNK` *to* the lamp | That's a lamp→backend frame. Use `AUDIO_OUT`. The lamp will silently drop unknown direction. |
 | ❌ Send `AUDIO_OUT` at any rate other than 24 kHz int16 LE mono | The lamp's I2S TX is configured for that exact rate. Other rates will sound wrong. |
 | ❌ Send `TFT_FRAME` with `swap=true` style RGB565 (native ESP32 order, not byte-swapped) | The lamp calls `pushColors(swap=false)` to match `Latex_engine_tft.py`. You'd see a colour-mangled equation. |
-| ❌ Send messages > 256 KB unless you've bumped the lamp's WS RX buffer | ArduinoWebsockets default limit. A single 240×320 TFT_FRAME = 153 KB is fine; an 8-frame scroll = 1.2 MB will be dropped. |
+| ❌ Send ANY single WS message > ~4 KB | ArduinoWebsockets allocates a contiguous DRAM `std::string` of the message length on receive — beyond ~4 KB risks `bad_alloc` → abort → reboot. Use the chunked protocols (`TFT_PART` 0x23 + `TFT_FRAME` terminator; `IMAGE_PART` 0x05 + `IMAGE_JPEG` terminator). The "single 153 KB TFT_FRAME" path quoted in older docs IS NOT SAFE and will brick the lamp under load. |
 | ❌ Re-encode the lamp's audio with denoise / AGC | It's already been through NS/ALE/AGC on the device. Re-processing typically hurts LLM understanding. |
 | ❌ Expect VAD / EOS info beyond `AUDIO_END` | The lamp doesn't tell you intermediate VAD state. |
 | ❌ Send a STATE byte the lamp doesn't recognise | Anything other than `0x00–0x05` is silently dropped (no crash, but no LED change either). |
-| ❌ Assume you can hold AUDIO_OUT for "later" | The lamp's speaker ring buffer is ~32 KB. If you queue 100 KB without rate-limiting, the lamp drops oldest. Throttle to ~250 ms/chunk wall-clock. |
+| ❌ Assume you can hold AUDIO_OUT for "later" | The lamp's speaker ring buffer is **64 KB** (~680 ms at 24 kHz). If you over-send (faster than 85 ms / 4 KB), the lamp drops oldest. Pace 85 ms/4 KB wall-clock — exactly matches playback rate. |
 | ❌ Forget `AUDIO_OUT_END` | Without it, the lamp's state machine never returns to idle. The user will see a stuck "speaking" LED forever. |
 
 ---
@@ -368,7 +450,7 @@ The lamp's firmware has some intentional quirks. The backend should not break th
 |---|---|---|
 | PSRAM (`cmd_buf`) | 96 KB allocated for recording | Hard cap of 30 s audio per turn; lamp enforces this. |
 | WS RX buffer | Tunable (default ~64 KB) | Keep one frame ≤ 96 KB to be safe. TFT_FRAME needs bumped buffer (see `IMPLEMENTATION_WEBSOCKET.md` §6.1). |
-| Speaker ring buffer | **32 KB DRAM, implemented in `spk_i2s.cpp`** (≈ 340 ms of audio at 24 kHz). | Don't send AUDIO_OUT faster than the lamp can play. The ring + WiFi-stack TCP buffer give ~600 ms headroom; 250 ms/12 KB pacing is comfortable. |
+| Speaker ring buffer | **64 KB DRAM, implemented in `spk_i2s.cpp`** (≈ 680 ms of audio at 24 kHz — bumped from 32 KB after parallel TFT_PART bursts caused overflows). | Don't send AUDIO_OUT faster than the lamp can play. Pace **85 ms / 4 KB** exactly = playback rate. |
 | Mono→stereo expansion buffer | 2 KB DRAM, owned by `spk_i2s` | Internal. You always send **mono**; the lamp duplicates samples L=R on its side. |
 | Half-duplex mic ↔ speaker | One physical I2S controller (`I2S_NUM_0`) with shared BCK/WS pins. Only one mode active at a time. | While speaker plays, mic is off. ~100 ms cold-start before audible, ~300–500 ms warm-up after `AUDIO_OUT_END` before mic is back. |
 | Mic DMA buffer | 8 × 256 = 2 KB per ear | Lamp internal; not your concern unless you starve loop() with huge inbound frames. |
@@ -382,24 +464,34 @@ The lamp's firmware has some intentional quirks. The backend should not break th
 ```
                     INBOUND (lamp → backend)
 ─────────────────────────────────────────────────────────────────
-0x01 IMAGE_JPEG      JPEG bytes              ~50 KB, once per turn
+0x05 IMAGE_PART      JPEG slice ≤ 1 KB       lamp accumulates
+0x01 IMAGE_JPEG      JPEG slice (terminator) flushes accumulator
+                     → SVGA q=10 ≈ 20–40 KB across ~25 PARTs + 1 JPEG
 0x02 AUDIO_CHUNK     int16 LE 16 kHz mono    ~640 B each, ~50/sec
 0x03 AUDIO_END       empty                   once, signals EOS
-0x04 CANCEL          empty                   not used in v1
+0x04 CANCEL          empty                   user pressed Select
 
                     OUTBOUND (backend → lamp)
 ─────────────────────────────────────────────────────────────────
-0x10 AUDIO_OUT       int16 LE 24 kHz MONO    chunk ~12 KB, ~4/sec
+0x10 AUDIO_OUT       int16 LE 24 kHz MONO    EXACTLY 4 KB / 85 ms paced
                      → lamp expands L=R internally for full DAC volume
                      → first chunk steals I2S from mic (half-duplex)
+                     → 64 KB ring buffer on lamp; over-send → drops
 0x11 AUDIO_OUT_END   empty                   REQUIRED — releases I2S back
                                               to mic (~300–500 ms gap)
-0x20 TFT_FRAME       [W H nFrames rsv][BGR-RGB565 BE-byteswapped]
-                                              153 KB single, ≤ 8× scroll
+0x23 TFT_PART        ≤ 2 KB chunk            lamp accumulates
+0x20 TFT_FRAME       chunk (terminator)      [W H nFrames rsv][pixels]
+                     → 320×240×2 = 153 KB single screen
+                     → 24-frame scroll ≈ 3.6 MB across ~1380 PARTs
+                     → SEND IN PARALLEL with AUDIO_OUT via asyncio.gather
 0x21 TFT_TEXT        UTF-8 ≤ 200 bytes       built-in font on-device
 0x22 TFT_CLEAR       empty                   wipe screen
 0x30 STATE           1 byte                  0x00 idle, 0x02 thinking,
                                               0x03 speaking, 0x05 unpaired
+
+                    HARD RULE
+─────────────────────────────────────────────────────────────────
+Every WS message ≤ ~4 KB, both directions. Larger → bad_alloc → reboot.
 
                     URLs the lamp hits
 ─────────────────────────────────────────────────────────────────
@@ -410,12 +502,15 @@ HTTPS {BACKEND}/api/device/poll-pairing (deferred)
 
                     Required per-turn ordering (BACKEND → LAMP)
 ─────────────────────────────────────────────────────────────────
-STATE(thinking)        # nice-to-have
-[STATE(speaking)]
-AUDIO_OUT × N          # 24 kHz PCM, chunked
-TFT_FRAME or TFT_TEXT  # display, after first AUDIO_OUT
-AUDIO_OUT_END          # REQUIRED
-STATE(idle)            # REQUIRED — returns LED to cyan
+STATE(0x02 thinking)
+STATE(0x03 speaking)
+TFT_TEXT                              # flips PAGE_THINKING → SPEAKING_TEXT
+asyncio.gather(
+    AUDIO_OUT × N (paced 85 ms / 4 KB),
+    TFT_PART × N + TFT_FRAME terminator,
+)
+AUDIO_OUT_END                         # REQUIRED
+STATE(0x00 idle)                      # REQUIRED — returns LED to cyan
 ```
 
 ---
@@ -455,8 +550,9 @@ screens the lamp can put up **without any prompting from you**:
 | `PAGE_LISTENING` | wake fires → MODE_COMMAND — live mic waveform | this is **before** you receive AUDIO_END |
 | `PAGE_THINKING` | MODE_SENDING (right after EOS) — orbiting dot spinner | **the lamp shows this on its own** at AUDIO_END. You do NOT need to ship a `TFT_TEXT("Thinking…")` — it's already on-screen. |
 | `PAGE_IMAGE_PREVIEW` | when camera ships, briefly after wake (~1.5 s) | n/a |
-| `PAGE_SPEAKING_TEXT` | when **you** send `TFT_TEXT` | text rendered inside a card with on-device font; side-edge bars animate while AUDIO_OUT is flowing |
-| `PAGE_SPEAKING_LATEX` | when **you** send `TFT_FRAME` | pixel-perfect paint of your bytes; user can ◀/▶ scroll if `nFrames > 1` |
+| `PAGE_SPEAKING_TEXT` | when **you** send `TFT_TEXT` and no `TFT_FRAME` has arrived for this turn | text rendered inside a card with on-device font; **UP/DOWN scrolls** if the paragraph exceeds the visible card (2 KB buffer = ~10+ pages); side-edge bars animate while AUDIO_OUT is flowing |
+| `PAGE_SPEAKING_LATEX` (LaTeX-only) | when **you** send `TFT_FRAME` and no `TFT_TEXT` has arrived | pixel-perfect paint of your bytes, full screen; LEFT/RIGHT scrolls through `nFrames` |
+| `PAGE_SPEAKING_LATEX` (**combined view**) | when **both** `TFT_TEXT` AND `TFT_FRAME` are loaded for the turn | LaTeX in TOP half (110 px), text card in BOTTOM half (~90 px). LEFT/RIGHT scrolls LaTeX frames; UP/DOWN scrolls text card. This is the standard "answer with formula + explanation" layout. |
 | `PAGE_ERROR` | WS in `NET_FATAL` | n/a |
 
 Things to internalise:
@@ -475,12 +571,20 @@ copied verbatim from `push_buttons/push_buttons.ino`:
 
 | Button | Raw ADC range | tft_ui action | Triggers a frame to backend? |
 |---|---|---|---|
-| **Left**  (`BTN1`) | `< 200` (~0.00 V) | `PAGE_SPEAKING_LATEX`: previous scroll frame | no |
+| **Left**  (`BTN1`) | `< 200` (~0.00 V) | `PAGE_SPEAKING_LATEX`: previous scroll frame (horizontal LaTeX scroll) | no |
 | **Select** (`BTN2`, centre) | `< 600` (~0.30 V → ~395) | `PAGE_SPEAKING_*` / `PAGE_IMAGE_PREVIEW`: dismiss to idle. During `MODE_COMMAND`/`MODE_SENDING`: **cancel** | **yes — sends `FRAME_CANCEL` (`0x04`)** |
-| **Right** (`BTN3`) | `< 1100` (~0.59 V → ~780) | `PAGE_SPEAKING_LATEX`: next scroll frame | no |
-| **Down**  (`BTN4`) | `< 1700` (~1.05 V → ~1380) | (reserved for menus) | no |
-| **Up**    (`BTN5`) | `< 2800` (~1.65 V → ~2180) | (reserved for menus) | no |
+| **Right** (`BTN3`) | `< 1100` (~0.59 V → ~780) | `PAGE_SPEAKING_LATEX`: next scroll frame (horizontal LaTeX scroll) | no |
+| **Down**  (`BTN4`) | `< 1700` (~1.05 V → ~1380) | `PAGE_SPEAKING_TEXT` AND combined-view `PAGE_SPEAKING_LATEX`: scroll text DOWN one line | no |
+| **Up**    (`BTN5`) | `< 2800` (~1.65 V → ~2180) | `PAGE_SPEAKING_TEXT` AND combined-view `PAGE_SPEAKING_LATEX`: scroll text UP one line | no |
 | (no press) | `> 2800` (~3.30 V → 4095) | — | — |
+
+> **Two axes of scroll in the combined view** (when BOTH `TFT_TEXT` and
+> `TFT_FRAME` arrive for the same turn): LEFT/RIGHT moves through the
+> LaTeX scroll frames (formula sliding horizontally in the top half of
+> the screen); UP/DOWN scrolls the text card (paragraph in the bottom
+> half). Hint strip at the bottom reads
+> `L/R latex 3/18   UP/DN text 2/4   SEL exit` so users know both axes
+> are live.
 
 Debounce: 50 ms. Edge-triggered on press (no repeat-on-hold for now).
 

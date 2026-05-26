@@ -14,6 +14,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 backend/.device_store.json
+lumos-backend/.device_store.json
 
 # misc
 .DS_Store
@@ -21,3 +22,16 @@ backend/.device_store.json
 
 # typescript
 *.tsbuildinfo
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.hypothesis/
+
+# lumos local data (file-backed fallbacks for blobs, turns, memories)
+lumos-backend/blobs/
+lumos-backend/turns/
+lumos-backend/memories/
+lumos-backend/out.wav

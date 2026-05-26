@@ -1,9 +1,9 @@
 """LUMOS v4 gateway entrypoint.
 
-Phase 0 surface:
-- REST: device pairing + management endpoints (``/api/device/*``, ``/api/devices``,
-  ``/api/pairing-info/{code}``)
-- WebSocket: ``/lamp/ws`` (binary frame protocol, device JWT auth)
+Phase 1 surface:
+- WebSocket ``/lamp/ws`` — binary frame protocol, multimodal Gemini brain,
+  Cartesia TTS, matplotlib LaTeX renderer.
+- REST: pairing endpoints (gated behind ``ENABLE_AUTH``), health probes.
 
 Run with::
 
@@ -11,50 +11,68 @@ Run with::
 """
 
 import logging
-import os
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from gateway import pairing as pairing_module
-from gateway import websocket as websocket_module
-from storage.devices import DeviceRegistry
-
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
+# Side-effect imports must come AFTER load_dotenv() so settings sees the env.
+from app.config import settings  # noqa: E402
+from app.logging import setup_logging  # noqa: E402
+from app.auth.devices import DeviceRegistry  # noqa: E402
+from app.providers import latex_renderer  # noqa: E402
+from app.routes import health, pairing  # noqa: E402
+from app.routes import ws_lamp  # noqa: E402
+
+
+setup_logging("INFO")
 logger = logging.getLogger("lumos_backend")
 
-DEVICE_STORE_PATH = Path(
-    os.getenv("DEVICE_STORE_PATH", str(Path(__file__).with_name(".device_store.json")))
-)
 
-device_registry = DeviceRegistry(DEVICE_STORE_PATH)
+# ---- Wiring ---------------------------------------------------------------
+device_registry = DeviceRegistry(settings.device_store_path)
 
 
 def _get_device_registry_override() -> DeviceRegistry:
     return device_registry
 
 
-app = FastAPI(title="LUMOS v4 Gateway", version="0.1.0")
+# Self-test the LaTeX renderer at boot so we fail loudly if mathtext shifted.
+try:
+    latex_renderer.selftest()
+    logger.info("LaTeX renderer self-test OK")
+except Exception as exc:  # pragma: no cover
+    logger.warning("LaTeX renderer self-test failed: %s — display kind=latex will fall back to text", exc)
+
+
+app = FastAPI(title="LUMOS v4 Gateway", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ALLOW_ORIGINS", "*").split(","),
+    allow_origins=list(settings.cors_allow_origins),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.dependency_overrides[pairing_module.get_device_registry] = _get_device_registry_override
+# Inject the registry singleton where routers expect it.
+app.dependency_overrides[pairing.get_device_registry] = _get_device_registry_override
+app.dependency_overrides[ws_lamp._get_device_registry] = _get_device_registry_override
 
-app.include_router(pairing_module.router)
-app.include_router(websocket_module.router)
+app.include_router(health.router)
+app.include_router(pairing.router)
+app.include_router(ws_lamp.router)
 
 
-@app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok", "service": "lumos-gateway", "phase": "0"}
+@app.get("/")
+async def root() -> dict[str, object]:
+    return {
+        "service": "lumos-gateway",
+        "phase": "1",
+        "auth_enabled": settings.enable_auth,
+        "llm_provider": settings.llm_provider,
+        "tts_provider": settings.tts_provider,
+    }
