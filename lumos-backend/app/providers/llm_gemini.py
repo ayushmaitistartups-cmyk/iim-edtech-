@@ -21,6 +21,7 @@ from io import BytesIO
 
 from ..config import settings
 from ..prompts import SYSTEM_PROMPT
+from . import cache_manager
 
 
 logger = logging.getLogger(__name__)
@@ -91,12 +92,32 @@ class GeminiLLM:
                 # Older SDKs use a different shape; fall back to plain call.
                 tools = []
 
+        # Try the explicit context cache. ``cached_content`` only works
+        # when the cached prefix is large enough (≥32 K tokens) AND we're
+        # not also using the grounding tool (the two are mutually
+        # exclusive per ``02_WORKFLOW.md`` §3). If neither condition is
+        # met, ``cache_name`` is None and we fall through to the plain
+        # ``system_instruction`` path — Gemini's implicit prefix caching
+        # still kicks in there automatically.
+        cache_name: str | None = None
+        if settings.gemini_context_cache and not enable_grounding:
+            cache_mgr = cache_manager.get_cache_manager_for(self._client, self.model)
+            cache_name = await cache_mgr.get_or_create_for_system_instruction(
+                key="system_prompt",
+                system_text=SYSTEM_PROMPT,
+                model=self.model,
+                ttl_s=settings.gemini_cache_ttl_s,
+            )
+
         config_kwargs: dict = dict(
-            system_instruction=SYSTEM_PROMPT,
             response_mime_type="application/json",
             max_output_tokens=settings.llm_max_output_tokens,
             temperature=0.7,
         )
+        if cache_name:
+            config_kwargs["cached_content"] = cache_name
+        else:
+            config_kwargs["system_instruction"] = SYSTEM_PROMPT
         if tools:
             config_kwargs["tools"] = tools
         config = types.GenerateContentConfig(**config_kwargs)

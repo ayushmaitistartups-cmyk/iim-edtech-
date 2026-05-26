@@ -38,6 +38,8 @@ class Settings:
 
     # ---- Phase 6: latency optimisation ---------------------------------
     streaming_tts: bool = _bool("STREAMING_TTS", False)
+    gemini_context_cache: bool = _bool("GEMINI_CONTEXT_CACHE", True)
+    gemini_cache_ttl_s: int = int(os.getenv("GEMINI_CACHE_TTL_S", "3600"))
 
     # ---- pairing / auth (deferred per BACKEND_TODO Layer 10) ------------
     device_jwt_secret: str = os.getenv("DEVICE_JWT_SECRET", "dev-device-jwt-secret-change-me")
